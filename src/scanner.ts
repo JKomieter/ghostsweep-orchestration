@@ -50,11 +50,22 @@ export async function executeMaigretScan(
 ): Promise<MaigretSiteResult[]> {
   await ensureReportsDir();
 
-  // Try direct maigret first (works on Fly.io), fall back to Docker (works locally)
-  const directCmd = `maigret ${username} --json simple --folderoutput "${REPORTS_DIR}"`;
-  const dockerCmd = `docker run --rm -v "${REPORTS_DIR}:/app/reports" soxoj/maigret:latest ${username} --json simple`;
+  // Sanitize username: replace spaces with underscores for the scan
+  // Maigret doesn't support usernames with spaces — they get split into
+  // separate positional arguments and the scan hangs or produces no output.
+  const sanitized = username.trim().replace(/\s+/g, "_");
+  if (sanitized !== username) {
+    console.log(`[scanner] Sanitized username: "${username}" → "${sanitized}"`);
+  }
 
-  console.log(`[scanner] Running Maigret scan for "${username}"...`);
+  // Shell-escape the username in case it contains special characters
+  const shellSafe = sanitized.replace(/'/g, "'\\''");
+
+  // Try direct maigret first (works on Fly.io), fall back to Docker (works locally)
+  const directCmd = `maigret '${shellSafe}' --json simple --folderoutput "${REPORTS_DIR}"`;
+  const dockerCmd = `docker run --rm -v "${REPORTS_DIR}:/app/reports" soxoj/maigret:latest '${shellSafe}' --json simple`;
+
+  console.log(`[scanner] Running Maigret scan for "${sanitized}"...`);
 
   // Check if maigret is available directly
   const useDirect = await new Promise<boolean>((resolve) => {
@@ -67,7 +78,7 @@ export async function executeMaigretScan(
   await new Promise<void>((resolve, reject) => {
     exec(cmd, { timeout: 300_000 }, (error, stdout, stderr) => {
       if (error) {
-        console.error(`[scanner] Docker error: ${error.message}`);
+        console.error(`[scanner] Maigret error: ${error.message}`);
         console.error(`[scanner] stderr: ${stderr}`);
         reject(error);
         return;
@@ -77,7 +88,7 @@ export async function executeMaigretScan(
     });
   });
 
-  const reportPath = path.join(REPORTS_DIR, `report_${username}_simple.json`);
+  const reportPath = path.join(REPORTS_DIR, `report_${sanitized}_simple.json`);
   const raw = await readFile(reportPath, "utf-8");
   const parsed = JSON.parse(raw) as Record<string, MaigretRawEntry>;
 
@@ -101,7 +112,8 @@ export async function executeMaigretScan(
  * Remove the local JSON report file after ingestion.
  */
 export async function cleanupReport(username: string): Promise<void> {
-  const reportPath = path.join(REPORTS_DIR, `report_${username}_simple.json`);
+  const sanitized = username.trim().replace(/\s+/g, "_");
+  const reportPath = path.join(REPORTS_DIR, `report_${sanitized}_simple.json`);
   try {
     await unlink(reportPath);
     console.log(`[scanner] Cleaned up report: ${reportPath}`);
