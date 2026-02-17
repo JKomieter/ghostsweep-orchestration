@@ -92,13 +92,13 @@ export async function runTeaserScan(
       exec("which maigret", (error) => resolve(!error));
     });
 
-    const directCmd = `maigret '${shellSafe}' --top-sites 1000 --json simple --folderoutput "${REPORTS_DIR}"`;
-    const dockerCmd = `docker run --rm -v "${REPORTS_DIR}:/app/reports" soxoj/maigret:latest '${shellSafe}' --top-sites 1000 --json simple`;
+    const directCmd = `maigret '${shellSafe}' --top-sites 2000 --json simple --folderoutput "${REPORTS_DIR}"`;
+    const dockerCmd = `docker run --rm -v "${REPORTS_DIR}:/app/reports" soxoj/maigret:latest '${shellSafe}' --top-sites 2000 --json simple`;
     const cmd = useDirect ? directCmd : dockerCmd;
 
-    console.log(`[teaser] Running Maigret (top 1000) for "${sanitized}" [${useDirect ? "direct" : "Docker"}]...`);
+    console.log(`[teaser] Running Maigret (top 2000) for "${sanitized}" [${useDirect ? "direct" : "Docker"}]...`);
 
-    await updateTeaserProgress(scanId, 10, "scanning", "Scanning top 1000 sites…");
+    await updateTeaserProgress(scanId, 10, "scanning", "Scanning top 2000 sites…");
 
     await new Promise<void>((resolve, reject) => {
       exec(cmd, { timeout: 300_000 }, (error, stdout, stderr) => {

@@ -240,6 +240,29 @@ async function processSelector(selector: UserSelector, scanId?: string): Promise
 const app = express();
 app.use(express.json());
 
+// ── CORS: only allow requests from our frontend origins ──
+const ALLOWED_ORIGINS = new Set([
+  "http://localhost:3000",
+  "https://ghostsweep.com",
+  "https://www.ghostsweep.com",
+]);
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
+
 // Ensure reports dir exists once at startup
 ensureReportsDir().catch(console.error);
 
@@ -398,7 +421,6 @@ app.get("/api/scan/teaser/:scanId/progress", async (req: Request, res: Response)
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  res.setHeader("Access-Control-Allow-Origin", "*");
   res.flushHeaders();
 
   console.log(`[sse] Client connected for scan ${scanId}`);
