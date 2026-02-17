@@ -308,3 +308,258 @@ export function scheduleScanReportEmail(
     }
   }, delayMs);
 }
+
+// ── Teaser Report Email ────────────────────────────────────────────
+
+/**
+ * Data needed to populate the teaser scan report email (for unauthenticated leads).
+ */
+export interface TeaserReportEmailData {
+  to: string;
+  username: string;
+  totalProfiles: number;
+  topSites: Array<{
+    siteName: string;
+    category: string;
+  }>;
+}
+
+/**
+ * Build the teaser scan report HTML email.
+ * Shows a limited preview of findings to drive signups.
+ */
+function buildTeaserReportHtml(data: TeaserReportEmailData): string {
+  const siteRows = data.topSites
+    .map(
+      (site) => `
+        <tr>
+          <td style="padding:10px 12px;font-size:14px;color:#ffffff;border-bottom:1px solid #222222;">${site.siteName}</td>
+          <td style="padding:10px 12px;font-size:14px;color:#b0b0b0;border-bottom:1px solid #222222;">${site.category}</td>
+          <td style="padding:10px 12px;font-size:14px;color:#ff8c00;border-bottom:1px solid #222222;">⚠️ Active</td>
+        </tr>`
+    )
+    .join("");
+
+  const hiddenCount = Math.max(0, data.totalProfiles - data.topSites.length);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Your Free Identity Scan Results</title>
+  </head>
+  <body style="margin:0;padding:0;background-color:#0a0a0a;color:#b0b0b0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#0a0a0a;padding:40px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"
+            style="
+              max-width:560px;
+              background:#111111;
+              border:1px solid #222222;
+              border-radius:12px;
+              padding:40px;
+              color:#b0b0b0;
+            "
+          >
+
+            <!-- Logo -->
+            <tr>
+              <td style="padding-bottom:32px;">
+                <img
+                  src="https://ghostsweep.t3.storage.dev/ghost-svgrepo-com.png"
+                  width="28"
+                  height="28"
+                  alt="GhostSweep"
+                  style="display:block;"
+                />
+              </td>
+            </tr>
+
+            <!-- Headline -->
+            <tr>
+              <td style="padding-bottom:24px;">
+                <h1 style="margin:0;font-size:22px;font-weight:700;color:#ffffff;line-height:1.3;">
+                  🔍 We Found ${data.totalProfiles} Account${data.totalProfiles !== 1 ? "s" : ""} Linked to "${data.username}"
+                </h1>
+              </td>
+            </tr>
+
+            <!-- Body Content -->
+            <tr>
+              <td style="padding-bottom:24px; font-size:15px; line-height:1.6;">
+                <p style="margin:0 0 16px;">
+                  We just scanned the <strong style="color:#ffffff;">top 500 platforms</strong> on the internet for the username <strong style="color:#00f2de;">"${data.username}"</strong> — and here's what we found.
+                </p>
+                <p style="margin:0 0 16px;">
+                  Each of these accounts is a potential entry point for <strong style="color:#ffffff;">identity theft, credential stuffing, or data leaks.</strong>
+                </p>
+              </td>
+            </tr>
+
+            <!-- Discovered Accounts -->
+            <tr>
+              <td style="padding-bottom:28px;">
+                <div style="
+                  background:#0a0a0a;
+                  border:1px solid #222222;
+                  border-radius:10px;
+                  padding:24px;
+                ">
+                  <h2 style="margin:0 0 20px;font-size:18px;font-weight:600;color:#ffffff;">
+                    📊 Scan Summary
+                  </h2>
+                  <table width="100%" cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td style="padding-bottom:14px;font-size:14px;color:#b0b0b0;line-height:1.6;">
+                        <strong style="color:#ffffff;">Username Scanned:</strong>
+                        <span style="color:#00f2de;font-weight:700;"> ${data.username}</span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding-bottom:14px;font-size:14px;color:#b0b0b0;line-height:1.6;">
+                        <strong style="color:#ffffff;">Sites Checked:</strong>
+                        <span style="color:#ffffff;font-weight:700;"> 500</span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding-bottom:0;font-size:14px;color:#b0b0b0;line-height:1.6;">
+                        <strong style="color:#ffffff;">Active Accounts Found:</strong>
+                        <span style="color:#ff6b6b;font-weight:700;"> ${data.totalProfiles}</span>
+                      </td>
+                    </tr>
+                  </table>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Top Discoveries Table -->
+            <tr>
+              <td style="padding-bottom:28px;">
+                <h2 style="margin:0 0 16px;font-size:18px;font-weight:600;color:#ffffff;">
+                  ⚠️ Sample Discoveries
+                </h2>
+                <div style="border:1px solid #222222;border-radius:10px;overflow:hidden;">
+                  <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                    <tr style="background:#1a1a1a;">
+                      <th style="padding:10px 12px;font-size:12px;font-weight:600;color:#666666;text-align:left;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #222222;">Platform</th>
+                      <th style="padding:10px 12px;font-size:12px;font-weight:600;color:#666666;text-align:left;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #222222;">Category</th>
+                      <th style="padding:10px 12px;font-size:12px;font-weight:600;color:#666666;text-align:left;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #222222;">Status</th>
+                    </tr>
+                    ${siteRows}
+                  </table>
+                </div>
+                ${hiddenCount > 0 ? `
+                <p style="margin:12px 0 0;font-size:13px;color:#666666;text-align:center;">
+                  + <strong style="color:#ff8c00;">${hiddenCount} more accounts</strong> hidden. Sign up to see the full report.
+                </p>` : ""}
+              </td>
+            </tr>
+
+            <!-- Risk Warning -->
+            <tr>
+              <td style="padding-bottom:28px;">
+                <div style="
+                  background:#0a0a0a;
+                  border:1px solid #333333;
+                  border-left:4px solid #ff6b6b;
+                  border-radius:8px;
+                  padding:16px;
+                ">
+                  <p style="margin:0;font-size:14px;line-height:1.6;">
+                    <strong style="color:#ff6b6b;">Why should you care?</strong> Abandoned and forgotten accounts are the #1 entry point for credential stuffing and identity theft. Hackers target old accounts with reused passwords to break into your primary email, banking, and social media.
+                  </p>
+                </div>
+              </td>
+            </tr>
+
+            <!-- CTA Section -->
+            <tr>
+              <td style="padding-bottom:28px;">
+                <div style="
+                  background:#0a0a0a;
+                  border:1px solid #222222;
+                  border-radius:10px;
+                  padding:24px;
+                ">
+                  <h2 style="margin:0 0 16px;font-size:18px;font-weight:600;color:#ffffff;">
+                    🛡️ Take Control of Your Digital Shadow
+                  </h2>
+                  <p style="margin:0 0 16px;font-size:14px;line-height:1.6;">
+                    Sign up for GhostSweep to get the <strong style="color:#00f2de;">full deep scan</strong> across 3,000+ sites, see your complete vulnerability score, uncover data breach links, and send <strong style="color:#00f2de;">automated deletion requests</strong>.
+                  </p>
+                </div>
+              </td>
+            </tr>
+
+            <!-- CTA Button -->
+            <tr>
+              <td align="center" style="padding-bottom:32px;">
+                <a href="https://ghostsweep.com/signup" style="
+                  background: #00f2de;
+                  color: #000000;
+                  padding: 14px 28px;
+                  text-decoration: none;
+                  border-radius: 8px;
+                  font-weight: 700;
+                  font-size: 15px;
+                  display: inline-block;
+                ">
+                  🔓 GET MY FULL REPORT — FREE TRIAL
+                </a>
+              </td>
+            </tr>
+
+            <!-- Signature -->
+            <tr>
+              <td style="padding-bottom:32px; font-size:15px; line-height:1.6;">
+                <p style="margin:0;">
+                  Stay safe,<br />
+                  <span style="color:#ffffff;">Joel</span><br />
+                  <span style="color:#666666;">Founder, GhostSweep</span>
+                </p>
+              </td>
+            </tr>
+
+            <!-- Footer -->
+            <tr>
+              <td style="border-top:1px solid #222222;padding-top:16px; text-align:center;">
+                <p style="margin:0;font-size:12px;color:#555555;">
+                  You're receiving this because you requested a free identity scan on GhostSweep.
+                  <br>
+                  <a href="https://ghostsweep.com/unsubscribe?email=${encodeURIComponent(data.to)}" style="color:#555555;text-decoration:underline;">Unsubscribe</a>
+                </p>
+              </td>
+            </tr>
+
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
+/**
+ * Send the teaser scan report email via Resend.
+ */
+export async function sendTeaserReportEmail(data: TeaserReportEmailData): Promise<void> {
+  const html = buildTeaserReportHtml(data);
+
+  console.log(`[email] Sending teaser report to ${data.to}...`);
+
+  const { error } = await resend.emails.send({
+    from: "Joel from GhostSweep <support@ghostsweep.com>",
+    to: data.to,
+    subject: `🔍 We found ${data.totalProfiles} accounts linked to "${data.username}"`,
+    html,
+  });
+
+  if (error) {
+    console.error("[email] Failed to send teaser:", error.message);
+    throw new Error(error.message);
+  }
+
+  console.log(`[email] ✅ Teaser report sent to ${data.to}.`);
+}

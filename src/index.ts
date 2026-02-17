@@ -13,6 +13,7 @@ import { createWebhookRouter } from "./webhook.js";
 import { scheduleScanReportEmail, categorizeSite } from "./email.js";
 import { verifyProfiles, buildIdentity } from "./verification.js";
 import { markScanStarted, updateScanStep, markScanFailed, updateScanFoundCount } from "./scan-progress.js";
+import { createTeaserScan, runTeaserScan } from "./teaser.js";
 import type { Request, Response, NextFunction } from "express";
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
@@ -251,6 +252,60 @@ app.get("/health", (_req, res) => {
 app.use("/webhook", createWebhookRouter());
 
 /**
+ * POST /api/scan/teaser
+ *
+ * Public endpoint (no auth required) for lead generation.
+ * Accepts { username, email } and runs a lightweight Maigret scan (top 500).
+ * Returns the scan_id immediately; the scan runs in the background.
+ * Results are saved to shadow_profiles with is_teaser = true.
+ * A teaser report email is sent to the provided email when complete.
+ */
+app.post("/api/scan/teaser", async (req: Request, res: Response) => {
+  const { username, email } = req.body as { username?: string; email?: string };
+
+  if (!username || !email) {
+    res.status(400).json({ error: "Both 'username' and 'email' are required." });
+    return;
+  }
+
+  // Basic email format validation
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    res.status(400).json({ error: "Invalid email format." });
+    return;
+  }
+
+  try {
+    // Create the scan row and return immediately
+    const scanId = await createTeaserScan(username, email);
+
+    res.status(202).json({
+      message: "Teaser scan started.",
+      scan_id: scanId,
+    });
+
+    // Run the scan pipeline in the background
+    setImmediate(async () => {
+      try {
+        await runTeaserScan(scanId, username, email);
+      } catch (err) {
+        Sentry.captureException(err, {
+          tags: { endpoint: "teaser" },
+          extra: { username, email, scanId },
+        });
+        console.error(`[teaser] Background scan error:`, err);
+      }
+    });
+  } catch (err) {
+    Sentry.captureException(err, {
+      tags: { endpoint: "teaser" },
+      extra: { username, email },
+    });
+    console.error(`[teaser] Failed to start scan:`, err);
+    res.status(500).json({ error: "Failed to start teaser scan." });
+  }
+});
+
+/**
  * POST /scan/:userId
  *
  * Trigger a full scan pipeline for a specific user.
@@ -326,6 +381,7 @@ Sentry.setupExpressErrorHandler(app);
 app.listen(PORT, () => {
   console.log(`[server] Listening on port ${PORT}`);
   console.log(`[server] Endpoints:`);
+  console.log(`  POST http://localhost:${PORT}/api/scan/teaser`);
   console.log(`  POST http://localhost:${PORT}/scan/:userId`);
   console.log(`  POST http://localhost:${PORT}/webhook/new-user`);
   console.log(`  GET  http://localhost:${PORT}/health`);
