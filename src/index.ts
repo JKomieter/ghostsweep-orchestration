@@ -1,3 +1,5 @@
+import './instrumentation.js'
+import * as Sentry from "@sentry/node";
 import { config } from "dotenv";
 config();
 
@@ -41,6 +43,13 @@ async function requireAuth(req: Request, res: Response, next: NextFunction): Pro
 
   // Attach user to the request for downstream handlers
   (req as any).user = data.user;
+
+  // Set Sentry user context for error tracking
+  if (data.user.email !== undefined) {
+    Sentry.setUser({ id: data.user.id, email: data.user.email });
+  } else {
+    Sentry.setUser({ id: data.user.id });
+  }
 
   // If there's a :userId param, enforce ownership
   const { userId } = req.params;
@@ -293,6 +302,10 @@ app.post("/scan/:userId", requireAuth, async (req, res) => {
         try {
           await processSelector(selector, scanId);
         } catch (err) {
+          Sentry.captureException(err, {
+            tags: { selector_type: selector.selector_type },
+            extra: { selector_value: selector.selector_value, userId },
+          });
           console.error(`[scan] Pipeline error for selector "${selector.selector_value}":`, err);
         }
       }
@@ -301,10 +314,14 @@ app.post("/scan/:userId", requireAuth, async (req, res) => {
       console.log(`[scan] ✅ All selectors processed for user ${userId}.`);
     } catch (err) {
       if (scanId) await markScanFailed(scanId, err instanceof Error ? err.message : String(err));
+      Sentry.captureException(err, { extra: { userId, scanId } });
       console.error(`[scan] Fatal error for user ${userId}:`, err);
     }
   });
 });
+
+// Sentry error handler — must be registered after all routes
+Sentry.setupExpressErrorHandler(app);
 
 app.listen(PORT, () => {
   console.log(`[server] Listening on port ${PORT}`);
