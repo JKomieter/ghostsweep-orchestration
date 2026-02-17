@@ -5,10 +5,12 @@ import express from "express";
 import supabase from "./supabase.js";
 import { ratelimit } from "./redis.js";
 import { executeMaigretScan, cleanupReport, ensureReportsDir, extractEmailPrefix, executePhoneOsint } from "./scanner.js";
-import { mapClaimedProfiles, upsertShadowProfiles, updateSelectorTimestamp, lookupBreachesByEmail, lookupBreachesByPhone } from "./ingestion.js";
+import { mapClaimedProfiles, upsertShadowProfiles, updateSelectorTimestamp, lookupBreachesByEmail, lookupBreachesByPhone, upsertDiscoveredServices } from "./ingestion.js";
 import { linkBreaches, updateSecurityScore } from "./scoring.js";
 import { createWebhookRouter } from "./webhook.js";
 import { scheduleScanReportEmail, categorizeSite } from "./email.js";
+import { verifyProfiles, buildIdentity } from "./verification.js";
+import { markScanStarted, updateScanStep, markScanFailed, updateScanFoundCount } from "./scan-progress.js";
 import type { Request, Response, NextFunction } from "express";
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
@@ -68,7 +70,7 @@ interface UserSelector {
  *  - email   → strip domain, Maigret scan on prefix + email breach lookup → score
  *  - phone   → breach lookup (highest risk) + phone OSINT placeholder → score
  */
-async function processSelector(selector: UserSelector): Promise<void> {
+async function processSelector(selector: UserSelector, scanId?: string): Promise<void> {
   const { id: selectorId, user_id: userId, selector_type: selectorType, selector_value: value } = selector;
 
   console.log(`\n${"=".repeat(60)}`);
@@ -82,34 +84,52 @@ async function processSelector(selector: UserSelector): Promise<void> {
     return;
   }
 
+  // Fetch user identity for profile verification
+  const { data: authUser } = await supabase.auth.admin.getUserById(userId);
+  const userEmail = authUser?.user?.email;
+  const userMeta = authUser?.user?.user_metadata;
+  const emailPrefix = userEmail ? userEmail.split("@")[0]! : value;
+  const identity = buildIdentity(emailPrefix, userEmail, userMeta);
+
   let phoneBreach = 0;
 
   switch (selectorType) {
     // ──────────────────────────────────────────────
-    // USERNAME: full Maigret Docker scan
+    // USERNAME: full Maigret scan + verification
     // ──────────────────────────────────────────────
     case "username": {
+      if (scanId) await updateScanStep(scanId, "maigret_scan");
       const results = await executeMaigretScan(value);
-      const records = mapClaimedProfiles(userId, results);
+      if (scanId) await updateScanStep(scanId, "verification");
+      const verified = await verifyProfiles(results, identity);
+      const records = mapClaimedProfiles(userId, verified, scanId);
+      if (scanId) await updateScanStep(scanId, "ingestion");
       await upsertShadowProfiles(records);
+      if (scanId) await updateScanStep(scanId, "services");
+      await upsertDiscoveredServices(userId, verified);
       await cleanupReport(value);
       break;
     }
 
     // ──────────────────────────────────────────────
-    // EMAIL: Maigret scan on the prefix + breach lookup on full email
+    // EMAIL: Maigret scan on the prefix + verification + breach lookup
     // ──────────────────────────────────────────────
     case "email": {
       const prefix = extractEmailPrefix(value);
       console.log(`[worker] Email detected. Running Maigret on prefix "${prefix}" and breach lookup on "${value}".`);
 
-      // Run Maigret on the email prefix (username portion)
+      if (scanId) await updateScanStep(scanId, "maigret_scan");
       const results = await executeMaigretScan(prefix);
-      const records = mapClaimedProfiles(userId, results);
+      if (scanId) await updateScanStep(scanId, "verification");
+      const verified = await verifyProfiles(results, identity);
+      const records = mapClaimedProfiles(userId, verified, scanId);
+      if (scanId) await updateScanStep(scanId, "ingestion");
       await upsertShadowProfiles(records);
+      if (scanId) await updateScanStep(scanId, "services");
+      await upsertDiscoveredServices(userId, verified);
       await cleanupReport(prefix);
 
-      // Separately check if the full email appears in known breaches
+      if (scanId) await updateScanStep(scanId, "breach_lookup");
       await lookupBreachesByEmail(userId, value);
       break;
     }
@@ -120,6 +140,7 @@ async function processSelector(selector: UserSelector): Promise<void> {
     case "phone": {
       console.log(`[worker] Phone detected. Running breach lookup for "${value}".`);
 
+      if (scanId) await updateScanStep(scanId, "breach_lookup");
       // Check if the phone number appears in any known breaches
       phoneBreach = await lookupBreachesByPhone(userId, value);
 
@@ -130,9 +151,15 @@ async function processSelector(selector: UserSelector): Promise<void> {
 
     default: {
       console.warn(`[worker] Unknown selector type "${selectorType}". Running Maigret scan as fallback.`);
+      if (scanId) await updateScanStep(scanId, "maigret_scan");
       const results = await executeMaigretScan(value);
-      const records = mapClaimedProfiles(userId, results);
+      if (scanId) await updateScanStep(scanId, "verification");
+      const verified = await verifyProfiles(results, identity);
+      const records = mapClaimedProfiles(userId, verified, scanId);
+      if (scanId) await updateScanStep(scanId, "ingestion");
       await upsertShadowProfiles(records);
+      if (scanId) await updateScanStep(scanId, "services");
+      await upsertDiscoveredServices(userId, verified);
       await cleanupReport(value);
       break;
     }
@@ -140,8 +167,19 @@ async function processSelector(selector: UserSelector): Promise<void> {
 
   // Common post-processing for all types
   await updateSelectorTimestamp(selectorId);
+  if (scanId) await updateScanStep(scanId, "scoring");
   await linkBreaches(userId);
   const score = await updateSecurityScore(userId, phoneBreach);
+
+  // Persist found_count on the scan row
+  if (scanId) {
+    const { count: totalProfiles } = await supabase
+      .from("shadow_profiles")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", userId);
+
+    await updateScanFoundCount(scanId, totalProfiles ?? 0);
+  }
 
   console.log(`\n[worker] ✅ Done processing "${value}" (${selectorType}). Score: ${score}\n`);
 
@@ -212,6 +250,7 @@ app.use("/webhook", createWebhookRouter());
  */
 app.post("/scan/:userId", requireAuth, async (req, res) => {
   const { userId } = req.params;
+  const { scan_id: scanId } = req.body as { scan_id?: string };
 
   if (!userId) {
     res.status(400).json({ error: "Missing userId parameter." });
@@ -247,14 +286,23 @@ app.post("/scan/:userId", requireAuth, async (req, res) => {
 
   // Run all selectors in the background
   setImmediate(async () => {
-    for (const selector of selectors as UserSelector[]) {
-      try {
-        await processSelector(selector);
-      } catch (err) {
-        console.error(`[scan] Pipeline error for selector "${selector.selector_value}":`, err);
+    if (scanId) await markScanStarted(scanId);
+
+    try {
+      for (const selector of selectors as UserSelector[]) {
+        try {
+          await processSelector(selector, scanId);
+        } catch (err) {
+          console.error(`[scan] Pipeline error for selector "${selector.selector_value}":`, err);
+        }
       }
+
+      if (scanId) await updateScanStep(scanId, "completed");
+      console.log(`[scan] ✅ All selectors processed for user ${userId}.`);
+    } catch (err) {
+      if (scanId) await markScanFailed(scanId, err instanceof Error ? err.message : String(err));
+      console.error(`[scan] Fatal error for user ${userId}:`, err);
     }
-    console.log(`[scan] ✅ All selectors processed for user ${userId}.`);
   });
 });
 

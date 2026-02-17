@@ -277,7 +277,7 @@ export async function sendScanReportEmail(data: ScanReportEmailData): Promise<vo
   console.log(`[email] Sending scan report to ${data.to}...`);
 
   const { error } = await resend.emails.send({
-    from: "Joel from GhostSweep <joel@ghostsweep.com>",
+    from: "Joel from GhostSweep <support@ghostsweep.com>",
     to: data.to,
     subject: `🔍 ${data.firstName}, your Identity Discovery Report is ready`,
     html,

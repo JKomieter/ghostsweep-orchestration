@@ -10,9 +10,11 @@ config();
 
 import supabase from "./supabase.js";
 import { executeMaigretScan, cleanupReport, ensureReportsDir, extractEmailPrefix, executePhoneOsint } from "./scanner.js";
-import { mapClaimedProfiles, upsertShadowProfiles, updateSelectorTimestamp, lookupBreachesByEmail, lookupBreachesByPhone } from "./ingestion.js";
+import { mapClaimedProfiles, upsertShadowProfiles, updateSelectorTimestamp, lookupBreachesByEmail, lookupBreachesByPhone, upsertDiscoveredServices } from "./ingestion.js";
 import { linkBreaches, updateSecurityScore } from "./scoring.js";
 import { scheduleScanReportEmail, categorizeSite } from "./email.js";
+import { verifyProfiles, buildIdentity } from "./verification.js";
+import { markScanStarted, updateScanStep, markScanFailed, updateScanFoundCount } from "./scan-progress.js";
 import { ratelimit } from "./redis.js";
 
 interface UserSelector {
@@ -22,7 +24,23 @@ interface UserSelector {
   selector_value: string;
 }
 
-async function processSelector(selector: UserSelector): Promise<void> {
+/** Cached user identity to avoid refetching for every selector of the same user. */
+let cachedIdentityUserId = "";
+let cachedIdentity = buildIdentity("");
+
+async function getIdentity(userId: string): Promise<ReturnType<typeof buildIdentity>> {
+  if (cachedIdentityUserId === userId) return cachedIdentity;
+
+  const { data: authUser } = await supabase.auth.admin.getUserById(userId);
+  const email = authUser?.user?.email;
+  const meta = authUser?.user?.user_metadata;
+  const prefix = email ? email.split("@")[0]! : "";
+  cachedIdentity = buildIdentity(prefix, email, meta);
+  cachedIdentityUserId = userId;
+  return cachedIdentity;
+}
+
+async function processSelector(selector: UserSelector, scanId?: string): Promise<void> {
   const { id: selectorId, user_id: userId, selector_type: selectorType, selector_value: value } = selector;
 
   console.log(`  [scan] Processing ${selectorType}: "${value}"`);
@@ -33,40 +51,62 @@ async function processSelector(selector: UserSelector): Promise<void> {
     return;
   }
 
+  const identity = await getIdentity(userId);
   let phoneBreach = 0;
 
   switch (selectorType) {
     case "username": {
+      if (scanId) await updateScanStep(scanId, "maigret_scan");
       const results = await executeMaigretScan(value);
-      const records = mapClaimedProfiles(userId, results);
+      if (scanId) await updateScanStep(scanId, "verification");
+      const verified = await verifyProfiles(results, identity);
+      const records = mapClaimedProfiles(userId, verified, scanId);
+      if (scanId) await updateScanStep(scanId, "ingestion");
       await upsertShadowProfiles(records);
+      if (scanId) await updateScanStep(scanId, "services");
+      await upsertDiscoveredServices(userId, verified);
       await cleanupReport(value);
       break;
     }
     case "email": {
       const prefix = extractEmailPrefix(value);
+      if (scanId) await updateScanStep(scanId, "maigret_scan");
       const results = await executeMaigretScan(prefix);
-      const records = mapClaimedProfiles(userId, results);
+      if (scanId) await updateScanStep(scanId, "verification");
+      const verified = await verifyProfiles(results, identity);
+      const records = mapClaimedProfiles(userId, verified, scanId);
+      if (scanId) await updateScanStep(scanId, "ingestion");
       await upsertShadowProfiles(records);
+      if (scanId) await updateScanStep(scanId, "services");
+      await upsertDiscoveredServices(userId, verified);
       await cleanupReport(prefix);
+      if (scanId) await updateScanStep(scanId, "breach_lookup");
       await lookupBreachesByEmail(userId, value);
       break;
     }
     case "phone": {
+      if (scanId) await updateScanStep(scanId, "breach_lookup");
       phoneBreach = await lookupBreachesByPhone(userId, value);
       await executePhoneOsint(value);
       break;
     }
     default: {
+      if (scanId) await updateScanStep(scanId, "maigret_scan");
       const results = await executeMaigretScan(value);
-      const records = mapClaimedProfiles(userId, results);
+      if (scanId) await updateScanStep(scanId, "verification");
+      const verified = await verifyProfiles(results, identity);
+      const records = mapClaimedProfiles(userId, verified, scanId);
+      if (scanId) await updateScanStep(scanId, "ingestion");
       await upsertShadowProfiles(records);
+      if (scanId) await updateScanStep(scanId, "services");
+      await upsertDiscoveredServices(userId, verified);
       await cleanupReport(value);
       break;
     }
   }
 
   await updateSelectorTimestamp(selectorId);
+  if (scanId) await updateScanStep(scanId, "scoring");
   await linkBreaches(userId);
   const score = await updateSecurityScore(userId, phoneBreach);
   console.log(`  [scan] ✅ Done "${value}" — score: ${score}`);
@@ -158,9 +198,24 @@ async function scanAll(): Promise<void> {
 
     let lastScore = 0;
 
+    // Create a shadow_scans record for this weekly scan run
+    let scanId: string | undefined;
+    try {
+      const { data: scanRow } = await supabase
+        .from("shadow_scans")
+        .insert({ user_id: uid, status: "starting" })
+        .select("id")
+        .single();
+      scanId = scanRow?.id;
+    } catch (e) {
+      console.warn("  [scan-all] Could not create shadow_scans row:", e);
+    }
+
+    if (scanId) await markScanStarted(scanId);
+
     for (const selector of selectors as UserSelector[]) {
       try {
-        await processSelector(selector);
+        await processSelector(selector, scanId);
         // Grab the latest score after each selector
         const { data: scoreRow } = await supabase
           .from("user_security_scores")
@@ -172,6 +227,17 @@ async function scanAll(): Promise<void> {
         console.error(`  [scan-all] Error for "${selector.selector_value}":`, err);
         failed++;
       }
+    }
+
+    // Persist found_count and mark complete
+    if (scanId) {
+      const { count: totalProfiles } = await supabase
+        .from("shadow_profiles")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", uid);
+
+      await updateScanFoundCount(scanId, totalProfiles ?? 0);
+      await updateScanStep(scanId, "completed");
     }
 
     // Send the weekly report email

@@ -126,13 +126,34 @@ const RISK_WEIGHTS = {
 } as const;
 
 /**
- * Recalculate and upsert the user's vulnerability score.
+ * Normalize a raw risk score into a 0–100 scale.
  *
- * Formula:
+ * Uses a saturating curve:  score = 100 × (1 − e^(−raw / k))
+ *
+ *   k controls how fast the curve rises.
+ *   With k = 80, rough guide:
+ *     Raw  20 → ~22   (a few profiles, no breaches)
+ *     Raw  50 → ~46   (moderate exposure)
+ *     Raw 100 → ~71   (significant exposure)
+ *     Raw 200 → ~92   (severe)
+ *     Raw 400 → ~99   (critical — saturating)
+ *
+ * Higher raw = higher vulnerability. Result is always 0–100.
+ */
+function normalizeScore(raw: number): number {
+  const K = 80;
+  const score = 100 * (1 - Math.exp(-raw / K));
+  return Math.round(Math.min(100, Math.max(0, score)));
+}
+
+/**
+ * Recalculate and upsert the user's vulnerability score (0–100).
+ *
+ * Raw formula:
  *   (Shadow Profiles × 2) + (Linked Breaches × 10) + (Phone Breaches × 25)
  *
- * Phone breaches receive the highest penalty because leaked phone numbers
- * are high-risk vectors for SIM-swapping and 2FA bypass.
+ * The raw total is then normalized to a 0–100 scale using a saturating
+ * exponential curve so the score never exceeds 100.
  *
  * @param phoneBreach - Number of phone-related breach matches found in this cycle (default 0).
  */
@@ -166,13 +187,16 @@ export async function updateSecurityScore(
 
   const totalProfiles = profileCount ?? 0;
   const totalBreaches = breachCount ?? 0;
-  const vulnerabilityScore =
+
+  const rawScore =
     totalProfiles * RISK_WEIGHTS.SHADOW_PROFILE +
     totalBreaches * RISK_WEIGHTS.BREACH_LINK +
     phoneBreach * RISK_WEIGHTS.PHONE_BREACH;
 
+  const vulnerabilityScore = normalizeScore(rawScore);
+
   console.log(
-    `[scoring] Profiles: ${totalProfiles}, Breach links: ${totalBreaches}, Phone breaches: ${phoneBreach}, Score: ${vulnerabilityScore}`
+    `[scoring] Profiles: ${totalProfiles}, Breach links: ${totalBreaches}, Phone breaches: ${phoneBreach}, Raw: ${rawScore}, Score: ${vulnerabilityScore}/100`
   );
 
   const { error: upsertErr } = await supabase
@@ -192,6 +216,6 @@ export async function updateSecurityScore(
     throw upsertErr;
   }
 
-  console.log(`[scoring] Security score updated to ${vulnerabilityScore}.`);
+  console.log(`[scoring] Security score updated to ${vulnerabilityScore}/100.`);
   return vulnerabilityScore;
 }

@@ -1,8 +1,10 @@
 import { Router } from "express";
 import supabase from "./supabase.js";
 import { executeMaigretScan, cleanupReport, extractEmailPrefix } from "./scanner.js";
-import { mapClaimedProfiles, upsertShadowProfiles, lookupBreachesByEmail } from "./ingestion.js";
+import { mapClaimedProfiles, upsertShadowProfiles, lookupBreachesByEmail, upsertDiscoveredServices } from "./ingestion.js";
 import { linkBreaches, updateSecurityScore } from "./scoring.js";
+import { verifyProfiles, buildIdentity } from "./verification.js";
+import { markScanStarted, updateScanStep, markScanFailed, updateScanFoundCount } from "./scan-progress.js";
 
 /**
  * Supabase webhook payload types.
@@ -157,24 +159,62 @@ export function createWebhookRouter(): Router {
 
         // Run in the background — don't block the webhook response
         setImmediate(async () => {
+          // Create a shadow_scans record for this webhook-initiated scan
+          let scanId: string | undefined;
           try {
+            const { data: scanRow } = await supabase
+              .from("shadow_scans")
+              .insert({ user_id: userId, status: "starting" })
+              .select("id")
+              .single();
+            scanId = scanRow?.id;
+          } catch (e) {
+            console.warn("[webhook] Could not create shadow_scans row:", e);
+          }
+
+          try {
+            if (scanId) await markScanStarted(scanId);
             console.log(`[webhook] Starting background scan for "${prefix}" / "${record.email}"...`);
 
-            // Maigret scan on the email prefix
+            // Build identity from the webhook user record
+            const meta = record.raw_user_meta_data;
+            const identity = buildIdentity(prefix, record.email, meta as Record<string, unknown> | undefined);
+
+            // Maigret scan on the email prefix + verification
+            if (scanId) await updateScanStep(scanId, "maigret_scan");
             const results = await executeMaigretScan(prefix);
-            const profiles = mapClaimedProfiles(userId, results);
+            if (scanId) await updateScanStep(scanId, "verification");
+            const verified = await verifyProfiles(results, identity);
+            const profiles = mapClaimedProfiles(userId, verified, scanId);
+            if (scanId) await updateScanStep(scanId, "ingestion");
             await upsertShadowProfiles(profiles);
+            if (scanId) await updateScanStep(scanId, "services");
+            await upsertDiscoveredServices(userId, verified);
             await cleanupReport(prefix);
 
             // Email breach lookup
+            if (scanId) await updateScanStep(scanId, "breach_lookup");
             await lookupBreachesByEmail(userId, record.email!);
 
             // Link & score
+            if (scanId) await updateScanStep(scanId, "scoring");
             await linkBreaches(userId);
-            await updateSecurityScore(userId);
+            const score = await updateSecurityScore(userId);
+
+            // Persist found_count and mark complete
+            if (scanId) {
+              const { count: totalProfiles } = await supabase
+                .from("shadow_profiles")
+                .select("*", { count: "exact", head: true })
+                .eq("user_id", userId);
+
+              await updateScanFoundCount(scanId, totalProfiles ?? 0);
+              await updateScanStep(scanId, "completed");
+            }
 
             console.log(`[webhook] ✅ Background scan complete for user ${userId}.`);
           } catch (err) {
+            if (scanId) await markScanFailed(scanId, err instanceof Error ? err.message : String(err));
             console.error(`[webhook] Background scan error for user ${userId}:`, err);
           }
         });
