@@ -375,6 +375,115 @@ app.post("/scan/:userId", requireAuth, async (req, res) => {
   });
 });
 
+/**
+ * GET /api/scan/teaser/:scanId/progress
+ *
+ * Server-Sent Events (SSE) endpoint for real-time scan progress.
+ * The frontend connects after receiving scan_id from POST /api/scan/teaser.
+ *
+ * Events sent:
+ *   data: { progress, status, message, found_count }
+ *
+ * The stream closes automatically when status is "completed" or "failed".
+ */
+app.get("/api/scan/teaser/:scanId/progress", async (req: Request, res: Response) => {
+  const { scanId } = req.params;
+
+  if (!scanId) {
+    res.status(400).json({ error: "Missing scanId parameter." });
+    return;
+  }
+
+  // Set SSE headers
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.flushHeaders();
+
+  console.log(`[sse] Client connected for scan ${scanId}`);
+
+  let lastProgress = -1;
+  let lastMessage = "";
+  let sentProfileCount = 0;
+
+  const intervalId = setInterval(async () => {
+    try {
+      const { data, error } = await supabase
+        .from("shadow_scans")
+        .select("status, progress, message, found_count")
+        .eq("id", scanId)
+        .single();
+
+      if (error) {
+        console.error(`[sse] Error fetching scan ${scanId}:`, error.message);
+        res.write(`data: ${JSON.stringify({ error: "Scan not found." })}\n\n`);
+        clearInterval(intervalId);
+        res.end();
+        return;
+      }
+
+      // Fetch any new profiles since our last poll
+      const { data: allProfiles } = await supabase
+        .from("shadow_profiles")
+        .select("site_name, profile_url")
+        .eq("scan_id", scanId)
+        .eq("is_teaser", true)
+        .order("last_verified_at", { ascending: true });
+
+      const currentProfiles = allProfiles ?? [];
+      const newProfiles = currentProfiles.slice(sentProfileCount);
+
+      // Send an event when progress changed OR new profiles arrived
+      if (data.progress !== lastProgress || data.message !== lastMessage || newProfiles.length > 0) {
+        lastProgress = data.progress;
+        lastMessage = data.message;
+        sentProfileCount = currentProfiles.length;
+
+        const event: Record<string, unknown> = {
+          progress: data.progress,
+          status: data.status,
+          message: data.message,
+          found_count: data.found_count ?? 0,
+        };
+
+        // Include only the newly discovered profiles in this event
+        if (newProfiles.length > 0) {
+          event.new_profiles = newProfiles;
+        }
+
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      }
+
+      // Close the stream when scan is done
+      if (data.status === "completed" || data.status === "failed") {
+        // Send final event with ALL profiles
+        const finalEvent: Record<string, unknown> = {
+          progress: data.status === "completed" ? 100 : data.progress,
+          status: data.status,
+          message: data.message,
+          found_count: data.found_count ?? 0,
+          profiles: currentProfiles,
+        };
+
+        res.write(`data: ${JSON.stringify(finalEvent)}\n\n`);
+
+        clearInterval(intervalId);
+        res.end();
+        console.log(`[sse] Stream closed for scan ${scanId} (${data.status})`);
+      }
+    } catch (err) {
+      console.error(`[sse] Poll error for scan ${scanId}:`, err);
+    }
+  }, 2_000); // Poll every 2 seconds
+
+  // Clean up if the client disconnects
+  req.on("close", () => {
+    clearInterval(intervalId);
+    console.log(`[sse] Client disconnected for scan ${scanId}`);
+  });
+});
+
 // Sentry error handler — must be registered after all routes
 Sentry.setupExpressErrorHandler(app);
 
@@ -382,6 +491,7 @@ app.listen(PORT, () => {
   console.log(`[server] Listening on port ${PORT}`);
   console.log(`[server] Endpoints:`);
   console.log(`  POST http://localhost:${PORT}/api/scan/teaser`);
+  console.log(`  GET  http://localhost:${PORT}/api/scan/teaser/:scanId/progress  (SSE)`);
   console.log(`  POST http://localhost:${PORT}/scan/:userId`);
   console.log(`  POST http://localhost:${PORT}/webhook/new-user`);
   console.log(`  GET  http://localhost:${PORT}/health`);
