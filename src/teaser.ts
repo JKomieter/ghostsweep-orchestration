@@ -44,18 +44,20 @@ interface TeaserShadowProfile {
  */
 export async function createTeaserScan(
   username: string,
-  email: string
+  email?: string
 ): Promise<string> {
+  const row: Record<string, unknown> = {
+    status: "scanning",
+    progress: 5,
+    message: "Initializing teaser scan…",
+    selector_value: username,
+    is_teaser: true,
+  };
+  if (email) row.email = email;
+
   const { data, error } = await supabase
     .from("shadow_scans")
-    .insert({
-      status: "scanning",
-      progress: 5,
-      message: "Initializing teaser scan…",
-      selector_value: username,
-      email,
-      is_teaser: true,
-    })
+    .insert(row)
     .select("id")
     .single();
 
@@ -64,7 +66,7 @@ export async function createTeaserScan(
     throw error;
   }
 
-  console.log(`[teaser] Created scan ${data.id} for "${username}" (${email})`);
+  console.log(`[teaser] Created scan ${data.id} for "${username}"${email ? ` (${email})` : ""}`);
   return data.id as string;
 }
 
@@ -81,7 +83,7 @@ export async function createTeaserScan(
 export async function runTeaserScan(
   scanId: string,
   username: string,
-  email: string
+  email?: string
 ): Promise<void> {
   try {
     // ── 1. Run Maigret ────────────────────────────────────────────
@@ -193,31 +195,35 @@ export async function runTeaserScan(
       console.warn(`[teaser] Could not delete report: ${reportPath}`);
     }
 
-    // ── 6. Email teaser results ───────────────────────────────────
-    try {
-      // Fetch top 5 discovered profiles for the email teaser
-      const { data: topProfiles } = await supabase
-        .from("shadow_profiles")
-        .select("site_name")
-        .eq("scan_id", scanId)
-        .eq("is_teaser", true)
-        .limit(5);
+    // ── 6. Email teaser results (only if email was provided) ──────
+    if (email) {
+      try {
+        // Fetch top 5 discovered profiles for the email teaser
+        const { data: topProfiles } = await supabase
+          .from("shadow_profiles")
+          .select("site_name")
+          .eq("scan_id", scanId)
+          .eq("is_teaser", true)
+          .limit(5);
 
-      const topSites = (topProfiles ?? []).map((p: { site_name: string }) => ({
-        siteName: p.site_name,
-        category: categorizeSite(p.site_name),
-      }));
+        const topSites = (topProfiles ?? []).map((p: { site_name: string }) => ({
+          siteName: p.site_name,
+          category: categorizeSite(p.site_name),
+        }));
 
-      await sendTeaserReportEmail({
-        to: email,
-        username,
-        totalProfiles: inserted,
-        topSites,
-      });
+        await sendTeaserReportEmail({
+          to: email,
+          username,
+          totalProfiles: inserted,
+          topSites,
+        });
 
-      console.log(`[teaser] 📧 Teaser email sent to ${email}.`);
-    } catch (emailErr) {
-      console.error("[teaser] Failed to send teaser email:", emailErr);
+        console.log(`[teaser] 📧 Teaser email sent to ${email}.`);
+      } catch (emailErr) {
+        console.error("[teaser] Failed to send teaser email:", emailErr);
+      }
+    } else {
+      console.log(`[teaser] No email provided — skipping teaser email.`);
     }
   } catch (err) {
     // Mark scan as failed

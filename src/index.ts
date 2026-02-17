@@ -263,13 +263,13 @@ app.use("/webhook", createWebhookRouter());
 app.post("/api/scan/teaser", async (req: Request, res: Response) => {
   const { username, email } = req.body as { username?: string; email?: string };
 
-  if (!username || !email) {
-    res.status(400).json({ error: "Both 'username' and 'email' are required." });
+  if (!username) {
+    res.status(400).json({ error: "'username' is required." });
     return;
   }
 
-  // Basic email format validation
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  // Validate email format only when provided
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     res.status(400).json({ error: "Invalid email format." });
     return;
   }
@@ -286,7 +286,7 @@ app.post("/api/scan/teaser", async (req: Request, res: Response) => {
     // Run the scan pipeline in the background
     setImmediate(async () => {
       try {
-        await runTeaserScan(scanId, username, email);
+        await runTeaserScan(scanId, username, email);    
       } catch (err) {
         Sentry.captureException(err, {
           tags: { endpoint: "teaser" },
