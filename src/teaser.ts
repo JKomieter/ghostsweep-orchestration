@@ -150,7 +150,7 @@ export async function runTeaserScan(
 
       const { error: upsertErr } = await supabase
         .from("shadow_profiles")
-        .upsert(records, { onConflict: "scan_id, profile_url" });
+        .upsert(records);
 
       if (upsertErr) {
         console.error(`[teaser] Batch upsert error:`, upsertErr.message);

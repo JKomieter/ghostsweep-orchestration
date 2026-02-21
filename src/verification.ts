@@ -68,9 +68,9 @@ const HIGH_TRUST_SITES = new Set([
 
 /**
  * Fetch the HTML content of a profile URL with a timeout.
- * Returns null if the fetch fails or times out.
+ * Returns the raw HTML and the final URL (after redirects), or null on failure.
  */
-async function fetchPage(url: string): Promise<string | null> {
+async function fetchPage(url: string): Promise<{ html: string; finalUrl: string } | null> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8_000);
@@ -105,7 +105,10 @@ async function fetchPage(url: string): Promise<string | null> {
     }
 
     reader.cancel().catch(() => {});
-    return new TextDecoder().decode(Buffer.concat(chunks));
+    return {
+      html: new TextDecoder().decode(Buffer.concat(chunks)),
+      finalUrl: res.url,
+    };
   } catch {
     return null;
   }
@@ -121,6 +124,78 @@ function stripHtml(html: string): string {
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .toLowerCase();
+}
+
+/**
+ * Returns true if the raw HTML has a noindex robots meta tag,
+ * indicating the page is deleted, banned, or otherwise suppressed by the site.
+ */
+function hasNoindexMeta(html: string): boolean {
+  // Match both attribute orderings: name first or content first
+  return (
+    /<meta[^>]+name=["']robots["'][^>]+content=["'][^"']*noindex[^"']*["']/i.test(html) ||
+    /<meta[^>]+content=["'][^"']*noindex[^"']*["'][^>]+name=["']robots["']/i.test(html)
+  );
+}
+
+/**
+ * Returns true if the username appears somewhere in the stripped page text.
+ * A genuine profile almost always mentions the username in a heading, breadcrumb,
+ * or meta block — even on heavily templated sites.
+ */
+function usernameInPage(pageText: string, username: string): boolean {
+  if (username.length < 3) return true; // too short to be a meaningful signal
+  return pageText.includes(username.toLowerCase());
+}
+
+/**
+ * Common phrases that indicate the profile page exists as a URL but the
+ * account/user was not found — i.e. a soft-404 false positive.
+ */
+const NOT_FOUND_PATTERNS = [
+  "user not found",
+  "account not found",
+  "page not found",
+  "profile not found",
+  "this account doesn't exist",
+  "this account does not exist",
+  "no user found",
+  "no results found",
+  "doesn't exist",
+  "does not exist",
+  "sorry, nothing to see here",
+  "sorry, this page isn't available",
+  "the link you followed may be broken",
+  "content unavailable",
+  "this page is unavailable",
+  "could not be found",
+  "couldn't find that page",
+  "404",
+  "not_found",
+  "has not filled out their profile",
+  "hasn't filled out their profile",
+  "profile is empty",
+  "no profile information",
+  "nothing here yet",
+  "this user hasn't posted anything",
+  "this user has not posted anything",
+  "member has not added any information",
+  "no posts yet",
+  "hasn't shared anything yet",
+  "has not shared anything yet",
+];
+
+/** Minimum stripped-text length to be considered a real profile page (chars). */
+const MIN_PAGE_LENGTH = 200;
+
+/**
+ * Returns true when the page is almost certainly a false positive:
+ * either the visible text is too thin to be a real profile, or it
+ * contains a canonical "not found" phrase.
+ */
+function isEmptyOrNotFound(pageText: string): boolean {
+  if (pageText.trim().length < MIN_PAGE_LENGTH) return true;
+  return NOT_FOUND_PATTERNS.some((p) => pageText.includes(p));
 }
 
 /**
@@ -193,9 +268,9 @@ export async function verifyProfiles(
         // High-trust sites: if Maigret says "claimed", give at least medium
         const isHighTrust = HIGH_TRUST_SITES.has(siteKey);
 
-        const html = await fetchPage(profile.url);
+        const fetched = await fetchPage(profile.url);
 
-        if (!html) {
+        if (!fetched) {
           // Couldn't fetch — trust Maigret for high-trust sites, otherwise low
           return {
             ...profile,
@@ -204,10 +279,55 @@ export async function verifyProfiles(
           };
         }
 
+        const { html, finalUrl } = fetched;
+
+        // ── noindex meta — deleted / banned / suppressed profile ──────────────
+        if (hasNoindexMeta(html)) {
+          return {
+            ...profile,
+            confidence: "low",
+            matchedSignals: ["noindex-meta"],
+          };
+        }
+
         const pageText = stripHtml(html);
+
+        // ── Redirect away from profile URL ────────────────────────────────────
+        // If the site silently redirected to a homepage / search page the final
+        // URL will no longer contain the username. Skip for high-trust JS-heavy
+        // sites where server-side rendering may change the URL shape.
+        const scanUsername = identity.emailPrefix.toLowerCase();
+        if (!isHighTrust && !finalUrl.toLowerCase().includes(scanUsername)) {
+          return {
+            ...profile,
+            confidence: "low",
+            matchedSignals: ["redirected-away"],
+          };
+        }
+
+        // ── Empty shell / soft-404 ────────────────────────────────────────────
+        if (isEmptyOrNotFound(pageText)) {
+          return {
+            ...profile,
+            confidence: "low",
+            matchedSignals: ["empty-or-not-found"],
+          };
+        }
+
+        // ── Username not present in page (non-high-trust only) ────────────────
+        // High-trust JS-rendered sites won't have the username in the static HTML,
+        // so we only apply this check to sites we can fully fetch.
+        if (!isHighTrust && !usernameInPage(pageText, scanUsername)) {
+          return {
+            ...profile,
+            confidence: "low",
+            matchedSignals: ["username-not-in-page"],
+          };
+        }
+
         const { matched, confidence } = matchSignals(pageText, identity);
 
-        // Boost high-trust sites to at least medium
+        // Boost high-trust sites to at least medium (page has real content)
         const finalConfidence: ConfidenceLevel =
           isHighTrust && CONFIDENCE_RANK[confidence] < CONFIDENCE_RANK["medium"]
             ? "medium"

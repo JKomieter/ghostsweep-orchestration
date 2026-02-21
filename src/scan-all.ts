@@ -10,7 +10,7 @@ config();
 
 import supabase from "./supabase.js";
 import { executeMaigretScan, cleanupReport, ensureReportsDir, extractEmailPrefix, executePhoneOsint } from "./scanner.js";
-import { mapClaimedProfiles, upsertShadowProfiles, updateSelectorTimestamp, lookupBreachesByEmail, lookupBreachesByPhone, upsertDiscoveredServices } from "./ingestion.js";
+import { mapClaimedProfiles, upsertShadowProfiles, updateSelectorTimestamp, lookupBreachesByEmail, lookupBreachesByPhone } from "./ingestion.js";
 import { linkBreaches, updateSecurityScore } from "./scoring.js";
 import { scheduleScanReportEmail, categorizeSite } from "./email.js";
 import { verifyProfiles, buildIdentity } from "./verification.js";
@@ -63,8 +63,6 @@ async function processSelector(selector: UserSelector, scanId?: string): Promise
       const records = mapClaimedProfiles(userId, verified, scanId);
       if (scanId) await updateScanStep(scanId, "ingestion");
       await upsertShadowProfiles(records);
-      if (scanId) await updateScanStep(scanId, "services");
-      await upsertDiscoveredServices(userId, verified);
       await cleanupReport(value);
       break;
     }
@@ -77,8 +75,6 @@ async function processSelector(selector: UserSelector, scanId?: string): Promise
       const records = mapClaimedProfiles(userId, verified, scanId);
       if (scanId) await updateScanStep(scanId, "ingestion");
       await upsertShadowProfiles(records);
-      if (scanId) await updateScanStep(scanId, "services");
-      await upsertDiscoveredServices(userId, verified);
       await cleanupReport(prefix);
       if (scanId) await updateScanStep(scanId, "breach_lookup");
       await lookupBreachesByEmail(userId, value);
@@ -98,8 +94,6 @@ async function processSelector(selector: UserSelector, scanId?: string): Promise
       const records = mapClaimedProfiles(userId, verified, scanId);
       if (scanId) await updateScanStep(scanId, "ingestion");
       await upsertShadowProfiles(records);
-      if (scanId) await updateScanStep(scanId, "services");
-      await upsertDiscoveredServices(userId, verified);
       await cleanupReport(value);
       break;
     }
