@@ -192,48 +192,48 @@ async function processSelector(selector: UserSelector, scanId?: string): Promise
   }
 
   console.log(`\n[worker] ✅ Done processing "${value}" (${selectorType}). Score: ${score}\n`);
+}
 
-  // ── Schedule post-scan email 2 minutes after completion ──
-  try {
-    const { data: authUser } = await supabase.auth.admin.getUserById(userId);
-    const email = authUser?.user?.email;
-    if (email) {
-      const meta = authUser.user?.user_metadata;
-      const firstName = meta?.first_name ?? meta?.full_name?.split(" ")[0] ?? meta?.name?.split(" ")[0] ?? "there";
+/**
+ * Send a single consolidated report email for a user after all their selectors
+ * have been scanned. Fetches fresh data so the email reflects the full run.
+ */
+async function sendReportEmail(userId: string, score: number): Promise<void> {
+  const { data: authUser } = await supabase.auth.admin.getUserById(userId);
+  const email = authUser?.user?.email;
+  if (!email) return;
 
-      // Fetch top 3 shadow profiles for the teaser table
-      const { data: profiles } = await supabase
-        .from("shadow_profiles")
-        .select("site_name")
-        .eq("user_id", userId)
-        .order("last_verified_at", { ascending: false })
-        .limit(3);
+  const meta = authUser.user?.user_metadata;
+  const firstName = meta?.first_name ?? meta?.full_name?.split(" ")[0] ?? meta?.name?.split(" ")[0] ?? "there";
 
-      const { count: totalProfiles } = await supabase
-        .from("shadow_profiles")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", userId);
+  const { data: profiles } = await supabase
+    .from("shadow_profiles")
+    .select("site_name")
+    .eq("user_id", userId)
+    .order("last_verified_at", { ascending: false })
+    .limit(3);
 
-      const { count: breachCount } = await supabase
-        .from("shadow_profile_breaches")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", userId);
+  const { count: totalProfiles } = await supabase
+    .from("shadow_profiles")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", userId);
 
-      scheduleScanReportEmail({
-        to: email,
-        firstName,
-        score: score ?? 0,
-        totalProfiles: totalProfiles ?? 0,
-        breachCount: breachCount ?? 0,
-        topSites: (profiles ?? []).map((p) => ({
-          siteName: p.site_name,
-          category: categorizeSite(p.site_name),
-        })),
-      });
-    }
-  } catch (emailErr) {
-    console.error("[worker] Failed to schedule report email:", emailErr);
-  }
+  const { count: breachCount } = await supabase
+    .from("shadow_profile_breaches")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", userId);
+
+  scheduleScanReportEmail({
+    to: email,
+    firstName,
+    score: score ?? 0,
+    totalProfiles: totalProfiles ?? 0,
+    breachCount: breachCount ?? 0,
+    topSites: (profiles ?? []).map((p) => ({
+      siteName: p.site_name,
+      category: categorizeSite(p.site_name),
+    })),
+  });
 }
 
 // --- Express server + entry point ---
@@ -336,7 +336,7 @@ app.post("/api/scan/teaser", async (req: Request, res: Response) => {
  * The scan runs in the background — the endpoint returns immediately.
  */
 app.post("/scan/:userId", requireAuth, async (req, res) => {
-  const { userId } = req.params;
+  const { userId } = req.params as { userId: string };
   const { scan_id: scanId } = req.body as { scan_id?: string };
 
   if (!userId) {
@@ -390,6 +390,18 @@ app.post("/scan/:userId", requireAuth, async (req, res) => {
 
       if (scanId) await updateScanStep(scanId, "completed");
       console.log(`[scan] ✅ All selectors processed for user ${userId}.`);
+
+      // Send one consolidated report email after all selectors are done
+      try {
+        const { data: scoreRow } = await supabase
+          .from("user_security_scores")
+          .select("score")
+          .eq("user_id", userId)
+          .single();
+        await sendReportEmail(userId, scoreRow?.score ?? 0);
+      } catch (emailErr) {
+        console.error(`[scan] Failed to send report email for user ${userId}:`, emailErr);
+      }
     } catch (err) {
       if (scanId) await markScanFailed(scanId, err instanceof Error ? err.message : String(err));
       Sentry.captureException(err, { extra: { userId, scanId } });

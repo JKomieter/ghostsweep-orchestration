@@ -169,26 +169,30 @@ function mapCategory(siteName: string, tags: string[]): string {
   const name = siteName.toLowerCase();
   const allTags = tags.map((t) => t.toLowerCase());
 
-  if (allTags.includes("social") || name.includes("facebook") || name.includes("twitter") || name.includes("instagram"))
-    return "Social";
-  if (allTags.includes("shopping") || allTags.includes("marketplace") || name.includes("amazon") || name.includes("ebay"))
-    return "Shopping";
-  if (allTags.includes("finance") || allTags.includes("crypto") || allTags.includes("trading") || name.includes("paypal"))
-    return "Finance";
-  if (allTags.includes("gaming") || name.includes("steam") || name.includes("roblox") || name.includes("xbox"))
+  if (allTags.includes("social") || name.includes("facebook") || name.includes("twitter") || name.includes("instagram") || name.includes("linkedin") || name.includes("snapchat") || name.includes("pinterest") || name.includes("mastodon") || name.includes("bluesky") || name.includes("threads"))
+    return "Social Media";
+  if (allTags.includes("video") || allTags.includes("streaming") || allTags.includes("music") || name.includes("youtube") || name.includes("tiktok") || name.includes("twitch") || name.includes("netflix") || name.includes("spotify") || name.includes("hulu") || name.includes("disney") || name.includes("vimeo") || name.includes("soundcloud"))
+    return "Streaming & Entertainment";
+  if (allTags.includes("shopping") || allTags.includes("marketplace") || allTags.includes("ecommerce") || name.includes("amazon") || name.includes("ebay") || name.includes("etsy") || name.includes("shopify") || name.includes("aliexpress") || name.includes("walmart"))
+    return "Shopping & E-commerce";
+  if (allTags.includes("finance") || allTags.includes("crypto") || allTags.includes("trading") || allTags.includes("banking") || name.includes("paypal") || name.includes("venmo") || name.includes("cashapp") || name.includes("coinbase") || name.includes("robinhood") || name.includes("stripe") || name.includes("revolut"))
+    return "Financial & Payments";
+  if (allTags.includes("productivity") || allTags.includes("work") || allTags.includes("business") || allTags.includes("coding") || allTags.includes("tech") || name.includes("github") || name.includes("gitlab") || name.includes("slack") || name.includes("notion") || name.includes("trello") || name.includes("asana") || name.includes("jira") || name.includes("zoom") || name.includes("dropbox") || name.includes("figma"))
+    return "Productivity & Work";
+  if (allTags.includes("travel") || allTags.includes("transportation") || name.includes("airbnb") || name.includes("booking") || name.includes("uber") || name.includes("lyft") || name.includes("expedia") || name.includes("tripadvisor") || name.includes("kayak") || name.includes("flixbus"))
+    return "Travel & Transportation";
+  if (allTags.includes("food") || allTags.includes("delivery") || allTags.includes("restaurant") || name.includes("doordash") || name.includes("ubereats") || name.includes("grubhub") || name.includes("instacart") || name.includes("yelp") || name.includes("opentable"))
+    return "Food & Delivery";
+  if (allTags.includes("gaming") || allTags.includes("game") || name.includes("steam") || name.includes("roblox") || name.includes("xbox") || name.includes("playstation") || name.includes("nintendo") || name.includes("epicgames") || name.includes("battlenet") || name.includes("riot"))
     return "Gaming";
-  if (allTags.includes("tech") || allTags.includes("coding") || name.includes("github") || name.includes("gitlab"))
-    return "Tech";
-  if (allTags.includes("video") || name.includes("youtube") || name.includes("tiktok") || name.includes("twitch"))
-    return "Entertainment";
-  if (allTags.includes("news") || allTags.includes("blog") || name.includes("medium") || name.includes("substack"))
-    return "News";
-  if (allTags.includes("education") || name.includes("coursera") || name.includes("udemy"))
-    return "Education";
-  if (allTags.includes("health") || allTags.includes("fitness"))
-    return "Health";
-  if (allTags.includes("travel") || name.includes("airbnb") || name.includes("booking"))
-    return "Travel";
+  if (allTags.includes("health") || allTags.includes("fitness") || allTags.includes("medical") || name.includes("strava") || name.includes("fitbit") || name.includes("myfitnesspal") || name.includes("peloton") || name.includes("headspace") || name.includes("calm"))
+    return "Health & Fitness";
+  if (allTags.includes("news") || allTags.includes("media") || allTags.includes("blog") || name.includes("medium") || name.includes("reddit") || name.includes("digg") || name.includes("buzzfeed") || name.includes("huffpost") || name.includes("nytimes") || name.includes("bbc"))
+    return "News & Media";
+  if (allTags.includes("email") || allTags.includes("communication") || allTags.includes("messaging") || name.includes("gmail") || name.includes("outlook") || name.includes("yahoo") || name.includes("proton") || name.includes("discord") || name.includes("telegram") || name.includes("whatsapp") || name.includes("signal") || name.includes("skype"))
+    return "Email & Communication";
+  if (allTags.includes("newsletter") || name.includes("substack") || name.includes("mailchimp") || name.includes("beehiiv") || name.includes("convertkit") || name.includes("buttondown"))
+    return "Newsletter";
   return "Other";
 }
 
