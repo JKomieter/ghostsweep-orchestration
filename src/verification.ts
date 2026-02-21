@@ -183,6 +183,13 @@ const NOT_FOUND_PATTERNS = [
   "no posts yet",
   "hasn't shared anything yet",
   "has not shared anything yet",
+  // Wiki / Fandom user namespace pages
+  "has not filled out their profile page yet",
+  "this user has not filled out their profile",
+  "user has not filled out",
+  "no user page has been created",
+  "there is currently no text in this page",
+  "this user prefers to keep an air of mystery",
 ];
 
 /** Minimum stripped-text length to be considered a real profile page (chars). */
@@ -191,11 +198,23 @@ const MIN_PAGE_LENGTH = 200;
 /**
  * Returns true when the page is almost certainly a false positive:
  * either the visible text is too thin to be a real profile, or it
- * contains a canonical "not found" phrase.
+ * contains a canonical "not found" phrase — checked against both
+ * stripped text AND raw HTML so patterns embedded inside <script>
+ * JSON blobs or template strings on JS-rendered sites are still caught.
  */
-function isEmptyOrNotFound(pageText: string): boolean {
+function isEmptyOrNotFound(pageText: string, rawHtml?: string): boolean {
   if (pageText.trim().length < MIN_PAGE_LENGTH) return true;
-  return NOT_FOUND_PATTERNS.some((p) => pageText.includes(p));
+  const lowerRaw = rawHtml ? rawHtml.toLowerCase() : "";
+  return NOT_FOUND_PATTERNS.some((p) => pageText.includes(p) || lowerRaw.includes(p));
+}
+
+/**
+ * Returns true if the URL looks like a wiki User: namespace page
+ * (MediaWiki, Fandom, etc.). These are almost always false positives
+ * when the username has no real content on the wiki.
+ */
+function isWikiUserPageUrl(url: string): boolean {
+  return /\/wiki\/user[_:]|\/w\/user[_:]|\/index\.php\?title=user[_:]/i.test(url);
 }
 
 /**
@@ -306,12 +325,32 @@ export async function verifyProfiles(
         }
 
         // ── Empty shell / soft-404 ────────────────────────────────────────────
-        if (isEmptyOrNotFound(pageText)) {
+        // Pass raw HTML so patterns inside <script> JSON blobs (JS-rendered
+        // wiki/fandom pages) are caught even after stripping.
+        if (isEmptyOrNotFound(pageText, html)) {
           return {
             ...profile,
             confidence: "low",
             matchedSignals: ["empty-or-not-found"],
           };
+        }
+
+        // ── Wiki User: namespace page with no identity signals ────────────────
+        // MediaWiki / Fandom pages for non-existent users return 200 with a full
+        // navigation chrome that passes length checks. If the URL is a User:
+        // namespace page and the content is just CC-BY-SA wiki boilerplate with
+        // no matching identity signals, it's an empty profile false positive.
+        if (isWikiUserPageUrl(profile.url) || isWikiUserPageUrl(finalUrl)) {
+          if (pageText.includes("cc-by-sa") || pageText.includes("creative commons")) {
+            const { matched } = matchSignals(pageText, identity);
+            if (matched.length === 0) {
+              return {
+                ...profile,
+                confidence: "low",
+                matchedSignals: ["wiki-empty-user-page"],
+              };
+            }
+          }
         }
 
         // ── Username not present in page (non-high-trust only) ────────────────
