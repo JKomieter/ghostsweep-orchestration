@@ -60,7 +60,7 @@ async function processSelector(selector: UserSelector, scanId?: string): Promise
       const results = await executeMaigretScan(value);
       if (scanId) await updateScanStep(scanId, "verification");
       const verified = await verifyProfiles(results, identity);
-      const records = mapClaimedProfiles(userId, verified, scanId);
+      const records = mapClaimedProfiles(userId, verified, scanId, selectorId);
       if (scanId) await updateScanStep(scanId, "ingestion");
       await upsertShadowProfiles(records);
       await cleanupReport(value);
@@ -72,7 +72,7 @@ async function processSelector(selector: UserSelector, scanId?: string): Promise
       const results = await executeMaigretScan(prefix);
       if (scanId) await updateScanStep(scanId, "verification");
       const verified = await verifyProfiles(results, identity);
-      const records = mapClaimedProfiles(userId, verified, scanId);
+      const records = mapClaimedProfiles(userId, verified, scanId, selectorId);
       if (scanId) await updateScanStep(scanId, "ingestion");
       await upsertShadowProfiles(records);
       await cleanupReport(prefix);
@@ -91,7 +91,7 @@ async function processSelector(selector: UserSelector, scanId?: string): Promise
       const results = await executeMaigretScan(value);
       if (scanId) await updateScanStep(scanId, "verification");
       const verified = await verifyProfiles(results, identity);
-      const records = mapClaimedProfiles(userId, verified, scanId);
+      const records = mapClaimedProfiles(userId, verified, scanId, selectorId);
       if (scanId) await updateScanStep(scanId, "ingestion");
       await upsertShadowProfiles(records);
       await cleanupReport(value);

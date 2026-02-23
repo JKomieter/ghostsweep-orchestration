@@ -10,6 +10,7 @@ interface ShadowProfileRecord {
   profile_url: string;
   last_verified_at: string;
   scan_id?: string;
+  selector_id?: number | string;
 }
 
 /**
@@ -18,7 +19,8 @@ interface ShadowProfileRecord {
 export function mapClaimedProfiles(
   userId: string,
   results: MaigretSiteResult[],
-  scanId?: string
+  scanId?: string,
+  selectorId?: number | string
 ): ShadowProfileRecord[] {
   const now = new Date().toISOString();
 
@@ -32,6 +34,7 @@ export function mapClaimedProfiles(
         last_verified_at: now,
       };
       if (scanId) record.scan_id = scanId;
+      if (selectorId !== undefined) record.selector_id = selectorId;
       return record;
     });
 }
