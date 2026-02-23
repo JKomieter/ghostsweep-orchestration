@@ -14,6 +14,7 @@ import { scheduleScanReportEmail, categorizeSite } from "./email.js";
 import { verifyProfiles, buildIdentity } from "./verification.js";
 import { markScanStarted, updateScanStep, markScanFailed, updateScanFoundCount } from "./scan-progress.js";
 import { createTeaserScan, runTeaserScan } from "./teaser.js";
+import { generateAndUploadReport } from "./report.js";
 import type { Request, Response, NextFunction } from "express";
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
@@ -518,6 +519,54 @@ app.get("/api/scan/teaser/:scanId/progress", async (req: Request, res: Response)
   });
 });
 
+/**
+ * POST /api/report/:userId
+ *
+ * Triggers a background job that:
+ *  1. Fetches all report data (inbox accounts, shadow profiles, breaches, assets)
+ *     for the user's connected Gmail / Microsoft accounts.
+ *  2. Renders a 5-page GhostSweep Identity Audit PDF using PDFKit.
+ *  3. Uploads the PDF to Supabase Storage under reports/{userId}/identity-audit.pdf.
+ *
+ * Returns 202 immediately with a job_id; the PDF URL is available in Storage
+ * once the background job completes (typically < 10 s).
+ *
+ * The caller must be the authenticated owner of the userId.
+ */
+app.post("/api/report/:userId", requireAuth, async (req: Request, res: Response) => {
+  const { userId } = req.params as { userId: string };
+
+  if (!userId) {
+    res.status(400).json({ error: "Missing userId parameter." });
+    return;
+  }
+
+  const jobId = crypto.randomUUID();
+
+  console.log(`[report] PDF report job ${jobId} queued for user ${userId}.`);
+
+  // Respond immediately so the client is not blocked.
+  res.status(202).json({
+    message: "Report generation started.",
+    job_id: jobId,
+    storage_path: `reports/${userId}/identity-audit.pdf`,
+  });
+
+  // Run the full pipeline in the background.
+  setImmediate(async () => {
+    try {
+      const publicUrl = await generateAndUploadReport(userId);
+      console.log(`[report] ✅ PDF ready for user ${userId}: ${publicUrl}`);
+    } catch (err) {
+      Sentry.captureException(err, {
+        tags: { endpoint: "report" },
+        extra: { userId, jobId },
+      });
+      console.error(`[report] ❌ PDF generation failed for user ${userId}:`, err);
+    }
+  });
+});
+
 // Sentry error handler — must be registered after all routes
 Sentry.setupExpressErrorHandler(app);
 
@@ -527,6 +576,7 @@ app.listen(PORT, () => {
   console.log(`  POST http://localhost:${PORT}/api/scan/teaser`);
   console.log(`  GET  http://localhost:${PORT}/api/scan/teaser/:scanId/progress  (SSE)`);
   console.log(`  POST http://localhost:${PORT}/scan/:userId`);
+  console.log(`  POST http://localhost:${PORT}/api/report/:userId`);
   console.log(`  POST http://localhost:${PORT}/webhook/new-user`);
   console.log(`  GET  http://localhost:${PORT}/health`);
 });
