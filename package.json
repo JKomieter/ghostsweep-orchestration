@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "dev": "npx tsx src/index.ts",
+    "dev": "nodemon --exec 'npx tsx src/index.ts' --ext ts --watch src",
     "scan:all": "npx tsx src/scan-all.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

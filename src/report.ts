@@ -151,7 +151,7 @@ export async function fetchReportData(userId: string): Promise<ReportData> {
       services ( name, category )
     `)
     .eq("user_id", userId)
-    .in("source", ["gmail", "microsoft", "outlook"])
+    .in("source", ["gmail", "outlook"])
     .order("last_seen_at", { ascending: false });
 
   const inboxAccounts: InboxAccount[] = (userServiceRows ?? []).map((r: any) => ({
