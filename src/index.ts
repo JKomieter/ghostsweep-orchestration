@@ -520,6 +520,61 @@ app.get("/api/scan/teaser/:scanId/progress", async (req: Request, res: Response)
 });
 
 /**
+ * GET /api/report/:userId
+ *
+ * Returns the latest generated report for the user:
+ *   { url: string, generatedAt: string }
+ *
+ * Returns 404 if no report has been generated yet.
+ * The caller must be the authenticated owner of the userId.
+ */
+app.get("/api/report/:userId", requireAuth, async (req: Request, res: Response) => {
+  const { userId } = req.params as { userId: string };
+
+  if (!userId) {
+    res.status(400).json({ error: "Missing userId parameter." });
+    return;
+  }
+
+  const STORAGE_BUCKET = "reports";
+  const storagePath    = `${userId}/identity-audit.pdf`;
+
+  // Check the file exists in storage
+  const { data: fileList, error: listError } = await supabase.storage
+    .from(STORAGE_BUCKET)
+    .list(userId, { search: "identity-audit.pdf" });
+
+  if (listError) {
+    console.error(`[report] Storage list error for user ${userId}:`, listError.message);
+    res.status(500).json({ error: "Failed to check report storage." });
+    return;
+  }
+
+  const file = fileList?.find((f) => f.name === "identity-audit.pdf");
+
+  if (!file) {
+    res.status(404).json({ error: "No report found." });
+    return;
+  }
+
+  // Generate a fresh signed URL (1 year TTL)
+  const { data: signedData, error: signedError } = await supabase.storage
+    .from(STORAGE_BUCKET)
+    .createSignedUrl(storagePath, 60 * 60 * 24 * 365);
+
+  if (signedError || !signedData?.signedUrl) {
+    console.error(`[report] Failed to create signed URL for user ${userId}:`, signedError?.message);
+    res.status(500).json({ error: "Failed to generate report URL." });
+    return;
+  }
+
+  res.json({
+    url:         signedData.signedUrl,
+    generatedAt: file.updated_at ?? file.created_at ?? null,
+  });
+});
+
+/**
  * POST /api/report/:userId
  *
  * Triggers a background job that:

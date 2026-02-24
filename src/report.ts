@@ -734,10 +734,10 @@ function renderInboxDiscovery(
   let y = newPage(doc, "02", "Inbox Discovery",
     `${accounts.length} verified accounts found across connected email providers`, logo);
 
-  const C1 = { label: "Service",     x: MARGIN,       w: 190 };
-  const C2 = { label: "Category",    x: MARGIN + 190, w: 120 };
-  const C3 = { label: "Last Active", x: MARGIN + 310, w: 110 };
-  const C4 = { label: "Source",      x: MARGIN + 420, w: 92  };
+  const C1 = { label: "Service",        x: MARGIN,       w: 148 };
+  const C2 = { label: "Category",       x: MARGIN + 148, w: 90  };
+  const C3 = { label: "Last Active",    x: MARGIN + 238, w: 90  };
+  const C4 = { label: "Linked Account", x: MARGIN + 328, w: 188 };
   const COLS = [C1, C2, C3, C4];
 
   y = tableHeader(doc, y, COLS);
@@ -761,12 +761,39 @@ function renderInboxDiscovery(
       y = tableHeader(doc, y, COLS);
     }
 
-    y = tableRow(doc, y, i, [
-      { text: acc.service_name,             x: C1.x, w: C1.w, bold: true,  color: stale ? RED : NAVY },
-      { text: acc.category,                 x: C2.x, w: C2.w,              color: MUTED },
-      { text: formatDate(acc.last_seen_at), x: C3.x, w: C3.w,              color: stale ? RED : MUTED },
-      { text: acc.source,                   x: C4.x, w: C4.w,              color: ACCENT },
-    ]);
+    // Custom row — draw background + cells + linked-account badge with email
+    const ROW_H = 18;
+    if (i % 2 === 0) {
+      doc.rect(MARGIN, y, CONTENT_W, ROW_H).fill(OFF_WHITE);
+      doc.rect(MARGIN, y, 2, ROW_H).fill(stale ? RED : ACCENT);
+    } else {
+      doc.rect(MARGIN, y, CONTENT_W, ROW_H).fill(WHITE);
+    }
+
+    doc.fillColor(stale ? RED : NAVY).font(FONT_BOLD).fontSize(8)
+      .text(acc.service_name, C1.x + 6, y + 5, { width: C1.w - 12, lineBreak: false });
+    doc.fillColor(MUTED).font(FONT_REGULAR).fontSize(8)
+      .text(acc.category, C2.x + 6, y + 5, { width: C2.w - 12, lineBreak: false });
+    doc.fillColor(stale ? RED : MUTED).font(FONT_REGULAR).fontSize(8)
+      .text(formatDate(acc.last_seen_at), C3.x + 6, y + 5, { width: C3.w - 12, lineBreak: false });
+
+    // Provider badge (GMAIL / MSFT) + linked email address
+    const isGmail     = acc.source === "gmail";
+    const BADGE_COLOR = isGmail ? "#EA4335" : "#0078D4";
+    const BADGE_LABEL = isGmail ? "GMAIL" : "MSFT";
+    const BADGE_W     = 36;
+    const BADGE_H     = 13;
+    doc.roundedRect(C4.x + 6, y + 3, BADGE_W, BADGE_H, 6).fill(BADGE_COLOR);
+    doc.fillColor(WHITE).font(FONT_BOLD).fontSize(6.5)
+      .text(BADGE_LABEL, C4.x + 6, y + 6, { width: BADGE_W, align: "center" });
+
+    const emailStr   = acc.email ?? "—";
+    const maxChars   = 28;
+    const truncEmail = emailStr.length > maxChars ? emailStr.slice(0, maxChars - 3) + "..." : emailStr;
+    doc.fillColor(NAVY2).font(FONT_REGULAR).fontSize(7.5)
+      .text(truncEmail, C4.x + 6 + BADGE_W + 5, y + 5, { width: C4.w - BADGE_W - 20, lineBreak: false });
+
+    y += ROW_H;
   }
 
   if (y < PAGE_HEIGHT - 60) {
