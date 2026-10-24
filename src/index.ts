@@ -220,7 +220,7 @@ async function sendReportEmail(userId: string, score: number): Promise<void> {
     .eq("user_id", userId);
 
   const { count: breachCount } = await supabase
-    .from("shadow_profile_breaches")
+    .from("user_breaches")
     .select("*", { count: "exact", head: true })
     .eq("user_id", userId);
 

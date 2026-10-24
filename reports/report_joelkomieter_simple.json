@@ -1,0 +1,613 @@
+{
+    "Behance": {
+        "site": {
+            "tags": [
+                "art",
+                "business",
+                "design"
+            ],
+            "headers": {
+                "User-Agent": "Curl"
+            },
+            "checkType": "status_code",
+            "alexaRank": 175,
+            "urlMain": "https://www.behance.net/",
+            "url": "https://www.behance.net/{username}",
+            "usernameClaimed": "blue",
+            "usernameUnclaimed": "noonewouldeverusethis7"
+        },
+        "username": "joelkomieter",
+        "keywords": [],
+        "parsing_enabled": true,
+        "url_main": "https://www.behance.net/",
+        "cookies": null,
+        "url_user": "https://www.behance.net/joelkomieter",
+        "url_probe": "https://www.behance.net/joelkomieter",
+        "ids_usernames": {
+            "joelkomieter": "username"
+        },
+        "ids_links": [],
+        "status": {
+            "username": "joelkomieter",
+            "site_name": "Behance",
+            "url": "https://www.behance.net/joelkomieter",
+            "status": "Claimed",
+            "ids": {
+                "uid": "1005009045",
+                "username": "joelkomieter",
+                "fullname": "Joel Komieter",
+                "image": "https://pps.services.adobe.com/api/profile/image/default/bb99dbb8-eab4-438d-ab41-f2f9f1b8ead3/276",
+                "location": "Ghana",
+                "created_at": "2021-06-28 20:53:25 UTC",
+                "follower_count": "0",
+                "following_count": "0",
+                "views_count": "0",
+                "appreciations": "0",
+                "_extractor": "Behance"
+            },
+            "tags": [
+                "art",
+                "business",
+                "design"
+            ],
+            "keywords": [],
+            "keyword_match_status": "No Keywords"
+        },
+        "http_status": 200,
+        "is_similar": false,
+        "rank": 175
+    },
+    "Giphy": {
+        "site": {
+            "absenceStrs": [
+                "404 Not Found"
+            ],
+            "presenseStrs": [
+                "Giphy",
+                "al:ios:app_name"
+            ],
+            "url": "https://giphy.com/channel/{username}",
+            "urlMain": "https://giphy.com",
+            "usernameClaimed": "theabbie",
+            "usernameUnclaimed": "noonewouldeverusethis7",
+            "checkType": "message",
+            "alexaRank": 412,
+            "tags": [
+                "art",
+                "sharing",
+                "social",
+                "video"
+            ]
+        },
+        "username": "joelkomieter",
+        "keywords": [],
+        "parsing_enabled": true,
+        "url_main": "https://giphy.com",
+        "cookies": null,
+        "url_user": "https://giphy.com/channel/joelkomieter",
+        "url_probe": "https://giphy.com/channel/joelkomieter",
+        "status": {
+            "username": "joelkomieter",
+            "site_name": "Giphy",
+            "url": "https://giphy.com/channel/joelkomieter",
+            "status": "Claimed",
+            "ids": {},
+            "tags": [
+                "art",
+                "sharing",
+                "social",
+                "video"
+            ],
+            "keywords": [],
+            "keyword_match_status": "No Keywords"
+        },
+        "http_status": 200,
+        "is_similar": false,
+        "rank": 412
+    },
+    "Academia.edu": {
+        "site": {
+            "tags": [
+                "education",
+                "research",
+                "sharing"
+            ],
+            "regexCheck": "^[^\\.]+$",
+            "protection": [
+                "tls_fingerprint"
+            ],
+            "checkType": "status_code",
+            "alexaRank": 286,
+            "urlMain": "https://www.academia.edu/",
+            "url": "https://independent.academia.edu/{username}",
+            "usernameClaimed": "blue",
+            "usernameUnclaimed": "noonewouldeverusethis7"
+        },
+        "username": "joelkomieter",
+        "keywords": [],
+        "parsing_enabled": true,
+        "url_main": "https://www.academia.edu/",
+        "cookies": null,
+        "url_user": "https://independent.academia.edu/joelkomieter",
+        "url_probe": "https://independent.academia.edu/joelkomieter",
+        "status": {
+            "username": "joelkomieter",
+            "site_name": "Academia.edu",
+            "url": "https://independent.academia.edu/joelkomieter",
+            "status": "Claimed",
+            "ids": {},
+            "tags": [
+                "education",
+                "research",
+                "sharing"
+            ],
+            "keywords": [],
+            "keyword_match_status": "No Keywords"
+        },
+        "http_status": 200,
+        "is_similar": false,
+        "rank": 286
+    },
+    "YouTube": {
+        "site": {
+            "tags": [
+                "social",
+                "streaming",
+                "video"
+            ],
+            "headers": {
+                "User-Agent": "curl/8.6.0",
+                "Accept": "*/*"
+            },
+            "regexCheck": "^[^\\/]+$",
+            "checkType": "message",
+            "presenseStrs": [
+                "visitorData",
+                "userAgent"
+            ],
+            "absenceStrs": [
+                "404 Not Found"
+            ],
+            "alexaRank": 3,
+            "urlMain": "https://www.youtube.com/",
+            "url": "https://www.youtube.com/@{username}/about",
+            "usernameClaimed": "test",
+            "usernameUnclaimed": "noonewouldeverusethis777"
+        },
+        "username": "joelkomieter",
+        "keywords": [],
+        "parsing_enabled": true,
+        "url_main": "https://www.youtube.com/",
+        "cookies": null,
+        "url_user": "https://www.youtube.com/@joelkomieter/about",
+        "url_probe": "https://www.youtube.com/@joelkomieter/about",
+        "ids_usernames": {},
+        "ids_links": [],
+        "status": {
+            "username": "joelkomieter",
+            "site_name": "YouTube",
+            "url": "https://www.youtube.com/@joelkomieter/about",
+            "status": "Claimed",
+            "ids": {
+                "youtube_channel_id": "UC9PanQ4zajidqeuhzrZbmbg",
+                "fullname": "Joel Komieter",
+                "image": "https://yt3.googleusercontent.com/ytc/AIdro_ktf9w-_Y-Ykk2WaCOrvRvto-DqwRfZrCwkWm-etOgO-lhcHcpTYkUtyPAuK6d42C4TAw=s900-c-k-c0x00ffffff-no-rj",
+                "channel_url": "http://www.youtube.com/@JoelKomieter",
+                "is_family_safe": "True",
+                "_extractor": "YouTube ytInitialData"
+            },
+            "tags": [
+                "social",
+                "streaming",
+                "video"
+            ],
+            "keywords": [],
+            "keyword_match_status": "No Keywords"
+        },
+        "http_status": 200,
+        "is_similar": false,
+        "rank": 3
+    },
+    "Paypal": {
+        "site": {
+            "tags": [
+                "apps",
+                "business",
+                "finance",
+                "fintech"
+            ],
+            "checkType": "message",
+            "absenceStrs": [
+                "<title>PayPal.Me</title><meta name=\"twitt",
+                "<div class=\"row error404\""
+            ],
+            "presenseStrs": [
+                "displayName",
+                "displayEmail"
+            ],
+            "alexaRank": 775,
+            "urlMain": "https://www.paypal.me",
+            "url": "https://www.paypal.com/paypalme/{username}",
+            "usernameClaimed": "adam",
+            "usernameUnclaimed": "noonewouldeverusethis7"
+        },
+        "username": "joelkomieter",
+        "keywords": [],
+        "parsing_enabled": true,
+        "url_main": "https://www.paypal.me",
+        "cookies": null,
+        "url_user": "https://www.paypal.com/paypalme/joelkomieter",
+        "url_probe": "https://www.paypal.com/paypalme/joelkomieter",
+        "ids_usernames": {
+            "JOELKOMIETER": "username"
+        },
+        "ids_links": [],
+        "status": {
+            "username": "joelkomieter",
+            "site_name": "Paypal",
+            "url": "https://www.paypal.com/paypalme/joelkomieter",
+            "status": "Claimed",
+            "ids": {
+                "fullname": "JOEL KOMIETER",
+                "username": "JOELKOMIETER",
+                "payerId": "2U7TS5DJZGBE4",
+                "address": "Newark, NJ",
+                "isProfileStatusActive": "True",
+                "primaryCurrencyCode": "USD",
+                "image": "https://www.paypalobjects.com/p2p/personalProfileImage.jpg",
+                "_extractor": "PayPal"
+            },
+            "tags": [
+                "apps",
+                "business",
+                "finance",
+                "fintech"
+            ],
+            "keywords": [],
+            "keyword_match_status": "No Keywords"
+        },
+        "http_status": 200,
+        "is_similar": false,
+        "rank": 775
+    },
+    "Twitter": {
+        "site": {
+            "tags": [
+                "messaging",
+                "social"
+            ],
+            "headers": {
+                "sec-ch-ua": "Google Chrome\";v=\"87\", \" Not;A Brand\";v=\"99\", \"Chromium\";v=\"87\"",
+                "authorization": "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA",
+                "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36",
+                "x-guest-token": "2114062922917765353"
+            },
+            "errors": {
+                "Bad guest token": "x-guest-token update required"
+            },
+            "regexCheck": "^[a-zA-Z0-9_]{1,15}$",
+            "activation": {
+                "method": "twitter",
+                "marks": [
+                    "Bad guest token",
+                    "Bad guest token."
+                ],
+                "url": "https://api.twitter.com/1.1/guest/activate.json",
+                "src": "guest_token",
+                "dst": "x-guest-token"
+            },
+            "urlProbe": "https://twitter.com/i/api/graphql/ZRnOhhXPwue_JGILb9TNug/UserByScreenName?variables=%7B%22screen_name%22%3A%22{username}%22%2C%22withHighlightedLabel%22%3Atrue%7D",
+            "checkType": "message",
+            "presenseStrs": [
+                "\"legacy\""
+            ],
+            "absenceStrs": [
+                " not found"
+            ],
+            "alexaRank": 5,
+            "urlMain": "https://www.twitter.com/",
+            "url": "https://twitter.com/{username}",
+            "usernameClaimed": "blue",
+            "usernameUnclaimed": "noonewould123"
+        },
+        "username": "joelkomieter",
+        "keywords": [],
+        "parsing_enabled": true,
+        "url_main": "https://www.twitter.com/",
+        "cookies": null,
+        "url_user": "https://twitter.com/joelkomieter",
+        "url_probe": "https://twitter.com/i/api/graphql/ZRnOhhXPwue_JGILb9TNug/UserByScreenName?variables=%7B%22screen_name%22%3A%22joelkomieter%22%2C%22withHighlightedLabel%22%3Atrue%7D",
+        "ids_usernames": {},
+        "ids_links": [
+            "https://ghostsweep.com/"
+        ],
+        "status": {
+            "username": "joelkomieter",
+            "site_name": "Twitter",
+            "url": "https://twitter.com/joelkomieter",
+            "status": "Claimed",
+            "ids": {
+                "uid": "VXNlcjoxOTk4OTY4MDgxNTkxNDQ3NTU0",
+                "fullname": "GhostSweep",
+                "bio": "Founder @ GhostSweep | Reclaiming the $21B retailers hope you forget. \ud83e\uddf9\ud83d\udcb0",
+                "created_at": "2025-12-11 04:09:01+00:00",
+                "image": "https://pbs.twimg.com/profile_images/2020271420505313281/Dxhjdt97.png",
+                "image_bg": "https://pbs.twimg.com/profile_banners/1998968081591447554/1770505217",
+                "is_protected": "False",
+                "follower_count": "9",
+                "following_count": "117",
+                "location": "New Jersey",
+                "favourites_count": "14",
+                "links": "['https://ghostsweep.com/']",
+                "_extractor": "Twitter GraphQL API"
+            },
+            "tags": [
+                "messaging",
+                "social"
+            ],
+            "keywords": [],
+            "keyword_match_status": "No Keywords"
+        },
+        "http_status": 200,
+        "is_similar": false,
+        "rank": 5
+    },
+    "Facebook": {
+        "site": {
+            "regexCheck": "^[a-zA-Z0-9_\\.]{3,49}(?<!\\.com|\\.org|\\.net)$",
+            "checkType": "message",
+            "absenceStrs": [
+                "rsrcTags"
+            ],
+            "presenseStrs": [
+                "first_name"
+            ],
+            "headers": {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36"
+            },
+            "alexaRank": 2,
+            "urlMain": "https://www.facebook.com/",
+            "url": "https://www.facebook.com/{username}",
+            "usernameClaimed": "zuck",
+            "usernameUnclaimed": "noonewouldeverusethis7",
+            "tags": [
+                "social"
+            ]
+        },
+        "username": "joelkomieter",
+        "keywords": [],
+        "parsing_enabled": true,
+        "url_main": "https://www.facebook.com/",
+        "cookies": null,
+        "url_user": "https://www.facebook.com/joelkomieter",
+        "url_probe": "https://www.facebook.com/joelkomieter",
+        "ids_usernames": {
+            "joel.komieter": "username"
+        },
+        "ids_links": [],
+        "status": {
+            "username": "joelkomieter",
+            "site_name": "Facebook",
+            "url": "https://www.facebook.com/joelkomieter",
+            "status": "Claimed",
+            "ids": {
+                "uid": "100051328239112",
+                "username": "joel.komieter",
+                "fullname": "Joel Komieter",
+                "description": "Joel Komieter is on Facebook. Join Facebook to connect with Joel Komieter and others you may know. Facebook gives people the power to share and makes the world more open and connected.",
+                "image": "https://scontent.facc6-1.fna.fbcdn.net/v/t1.6435-1/98313581_104285777959030_3659086190847459328_n.jpg?stp=dst-jpg_tt6&cstp=mx720x1184&ctp=s720x1184&_nc_cat=105&_nc_map=urlgen_bucketless&ccb=1-7&_nc_sid=3ab345&_nc_ohc=KgW6rM2TrmMQ7kNvwH5ixVp&_nc_oc=AdrnCHPl7yuC8502G3KDr59qDHUUEZx-rIxINsZW_gh59-8p4DmG8qhkqjGKEXt-UtY&_nc_zt=24&_nc_ht=scontent.facc6-1.fna&_nc_gid=P_vcnyK45NqjMBaC1un71g&_nc_ss=7020f&oh=00_AQOrGJFoL2DgehhCqVcSKFPJTDonknyNJtfrpva1B9g4Pg&oe=6B047C8F",
+                "_extractor": "Facebook user profile"
+            },
+            "tags": [
+                "social"
+            ],
+            "keywords": [],
+            "keyword_match_status": "No Keywords"
+        },
+        "http_status": 200,
+        "is_similar": false,
+        "rank": 2
+    },
+    "Picsart": {
+        "site": {
+            "tags": [
+                "art",
+                "design",
+                "photo"
+            ],
+            "checkType": "message",
+            "presenseStrs": [
+                "\"status\":\"success\""
+            ],
+            "absenceStrs": [
+                "user_not_found"
+            ],
+            "alexaRank": 8046,
+            "urlMain": "https://picsart.com/",
+            "url": "https://picsart.com/u/{username}",
+            "urlProbe": "https://api.picsart.com/users/show/{username}.json",
+            "usernameClaimed": "adam",
+            "usernameUnclaimed": "noonewouldeverusethis7"
+        },
+        "username": "joelkomieter",
+        "keywords": [],
+        "parsing_enabled": true,
+        "url_main": "https://picsart.com/",
+        "cookies": null,
+        "url_user": "https://picsart.com/u/joelkomieter",
+        "url_probe": "https://api.picsart.com/users/show/joelkomieter.json",
+        "ids_usernames": {
+            "joelkomieter": "username"
+        },
+        "ids_links": [],
+        "status": {
+            "username": "joelkomieter",
+            "site_name": "Picsart",
+            "url": "https://picsart.com/u/joelkomieter",
+            "status": "Claimed",
+            "ids": {
+                "picsart_id": "481156376022101",
+                "picsart_username": "joelkomieter",
+                "fullname": "Joel Komieter",
+                "image": "https://cdn190.picsart.com/232804661007900.png",
+                "follower_count": "0",
+                "following_count": "1",
+                "likes_count": "0",
+                "photos_count": "0",
+                "is_verified": "False",
+                "_extractor": "Picsart API"
+            },
+            "tags": [
+                "art",
+                "design",
+                "photo"
+            ],
+            "keywords": [],
+            "keyword_match_status": "No Keywords"
+        },
+        "http_status": 200,
+        "is_similar": false,
+        "rank": 8046
+    },
+    "Imgflip": {
+        "site": {
+            "checkType": "message",
+            "absenceStrs": [
+                "\t\t<h1>404 Page Not Found</h1>\r",
+                "<title>404 Page Not Found</title>\r",
+                "info-page ibox",
+                "\t\t<p>Or maybe the <a href=",
+                "\t\t<p>Were you looking for the <a href="
+            ],
+            "presenseStrs": [
+                "u-username",
+                "user-page",
+                "user-title",
+                "user-panel",
+                "user-joined"
+            ],
+            "url": "https://imgflip.com/user/{username}",
+            "urlMain": "https://imgflip.com",
+            "usernameClaimed": "sparkles99",
+            "usernameUnclaimed": "hrypxleske",
+            "alexaRank": 4416,
+            "tags": [
+                "art",
+                "photo",
+                "sharing",
+                "social"
+            ]
+        },
+        "username": "joelkomieter",
+        "keywords": [],
+        "parsing_enabled": true,
+        "url_main": "https://imgflip.com",
+        "cookies": null,
+        "url_user": "https://imgflip.com/user/joelkomieter",
+        "url_probe": "https://imgflip.com/user/joelkomieter",
+        "status": {
+            "username": "joelkomieter",
+            "site_name": "Imgflip",
+            "url": "https://imgflip.com/user/joelkomieter",
+            "status": "Claimed",
+            "ids": {},
+            "tags": [
+                "art",
+                "photo",
+                "sharing",
+                "social"
+            ],
+            "keywords": [],
+            "keyword_match_status": "No Keywords"
+        },
+        "http_status": 200,
+        "is_similar": false,
+        "rank": 4416
+    },
+    "FilmWeb": {
+        "site": {
+            "tags": [
+                "movies",
+                "pl"
+            ],
+            "regexCheck": "^[^\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uac00-\\ud7af\\uf900-\\ufaff]+$",
+            "checkType": "message",
+            "absenceStrs": [
+                "top.location.href = '/404';"
+            ],
+            "alexaRank": 13801,
+            "urlMain": "https://www.filmweb.pl/user/adam",
+            "url": "https://www.filmweb.pl/user/{username}",
+            "usernameClaimed": "adam",
+            "usernameUnclaimed": "noonewouldeverusethis7"
+        },
+        "username": "joelkomieter",
+        "keywords": [],
+        "parsing_enabled": true,
+        "url_main": "https://www.filmweb.pl/user/adam",
+        "cookies": null,
+        "url_user": "https://www.filmweb.pl/user/joelkomieter",
+        "url_probe": "https://www.filmweb.pl/user/joelkomieter",
+        "status": {
+            "username": "joelkomieter",
+            "site_name": "FilmWeb",
+            "url": "https://www.filmweb.pl/user/joelkomieter",
+            "status": "Claimed",
+            "ids": {},
+            "tags": [
+                "movies",
+                "pl"
+            ],
+            "keywords": [],
+            "keyword_match_status": "No Keywords"
+        },
+        "http_status": 404,
+        "is_similar": false,
+        "rank": 13801
+    },
+    "Codementor": {
+        "site": {
+            "tags": [
+                "coding",
+                "freelance",
+                "tech"
+            ],
+            "checkType": "message",
+            "presenseStrs": [
+                "<div class=\"title\">"
+            ],
+            "absenceStrs": [
+                "Adapted from"
+            ],
+            "alexaRank": 12757,
+            "urlMain": "https://www.codementor.io/",
+            "url": "https://www.codementor.io/@{username}",
+            "usernameClaimed": "arjunmenon",
+            "usernameUnclaimed": "noonewouldeverusethis7"
+        },
+        "username": "joelkomieter",
+        "keywords": [],
+        "parsing_enabled": true,
+        "url_main": "https://www.codementor.io/",
+        "cookies": null,
+        "url_user": "https://www.codementor.io/@joelkomieter",
+        "url_probe": "https://www.codementor.io/@joelkomieter",
+        "status": {
+            "username": "joelkomieter",
+            "site_name": "Codementor",
+            "url": "https://www.codementor.io/@joelkomieter",
+            "status": "Claimed",
+            "ids": {},
+            "tags": [
+                "coding",
+                "freelance",
+                "tech"
+            ],
+            "keywords": [],
+            "keyword_match_status": "No Keywords"
+        },
+        "http_status": 200,
+        "is_similar": false,
+        "rank": 12757
+    }
+}

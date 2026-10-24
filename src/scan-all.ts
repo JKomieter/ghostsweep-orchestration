@@ -1,21 +1,25 @@
 /**
- * CLI script: Run the full scan pipeline for ALL users with selectors.
+ * CLI script: Weekly Maigret OSINT scan for ALL users with username/email selectors.
  * Intended to be called by GitHub Actions on a weekly schedule.
+ * Phone selectors are skipped — Maigret only searches usernames.
  *
  * Usage:
- *   npx tsx src/scan-all.ts
+ *   npx tsx src/scan-all.ts             # scan + send weekly report emails
+ *   npx tsx src/scan-all.ts --no-email  # scan only
  */
 import { config } from "dotenv";
 config();
 
 import supabase from "./supabase.js";
-import { executeMaigretScan, cleanupReport, ensureReportsDir, extractEmailPrefix, executePhoneOsint } from "./scanner.js";
-import { mapClaimedProfiles, upsertShadowProfiles, updateSelectorTimestamp, lookupBreachesByEmail, lookupBreachesByPhone } from "./ingestion.js";
-import { linkBreaches, updateSecurityScore } from "./scoring.js";
-import { scheduleScanReportEmail, categorizeSite } from "./email.js";
+import { executeMaigretScan, cleanupReport, ensureReportsDir, extractEmailPrefix } from "./scanner.js";
+import { mapClaimedProfiles, upsertShadowProfiles, updateSelectorTimestamp } from "./ingestion.js";
+import { sendWeeklyReportEmail } from "./email.js";
+import { fetchWeeklyReportData, snapshotProfileUrls, getReportWindowStart, markWeeklyReportSent } from "./weekly-report.js";
 import { verifyProfiles, buildIdentity } from "./verification.js";
 import { markScanStarted, updateScanStep, markScanFailed, updateScanFoundCount } from "./scan-progress.js";
 import { ratelimit } from "./redis.js";
+
+const NO_EMAIL = process.argv.includes("--no-email");
 
 interface UserSelector {
   id: string;
@@ -52,98 +56,32 @@ async function processSelector(selector: UserSelector, scanId?: string): Promise
   }
 
   const identity = await getIdentity(userId);
-  let phoneBreach = 0;
 
-  switch (selectorType) {
-    case "username": {
-      if (scanId) await updateScanStep(scanId, "maigret_scan");
-      const results = await executeMaigretScan(value);
-      if (scanId) await updateScanStep(scanId, "verification");
-      const verified = await verifyProfiles(results, identity);
-      const records = mapClaimedProfiles(userId, verified, scanId, selectorId);
-      if (scanId) await updateScanStep(scanId, "ingestion");
-      await upsertShadowProfiles(records);
-      await cleanupReport(value);
-      break;
-    }
-    case "email": {
-      const prefix = extractEmailPrefix(value);
-      if (scanId) await updateScanStep(scanId, "maigret_scan");
-      const results = await executeMaigretScan(prefix);
-      if (scanId) await updateScanStep(scanId, "verification");
-      const verified = await verifyProfiles(results, identity);
-      const records = mapClaimedProfiles(userId, verified, scanId, selectorId);
-      if (scanId) await updateScanStep(scanId, "ingestion");
-      await upsertShadowProfiles(records);
-      await cleanupReport(prefix);
-      if (scanId) await updateScanStep(scanId, "breach_lookup");
-      await lookupBreachesByEmail(userId, value);
-      break;
-    }
-    case "phone": {
-      if (scanId) await updateScanStep(scanId, "breach_lookup");
-      phoneBreach = await lookupBreachesByPhone(userId, value);
-      await executePhoneOsint(value);
-      break;
-    }
-    default: {
-      if (scanId) await updateScanStep(scanId, "maigret_scan");
-      const results = await executeMaigretScan(value);
-      if (scanId) await updateScanStep(scanId, "verification");
-      const verified = await verifyProfiles(results, identity);
-      const records = mapClaimedProfiles(userId, verified, scanId, selectorId);
-      if (scanId) await updateScanStep(scanId, "ingestion");
-      await upsertShadowProfiles(records);
-      await cleanupReport(value);
-      break;
-    }
-  }
+  // Maigret searches by username; for emails we search the local part.
+  const username = selectorType === "email" ? extractEmailPrefix(value) : value;
+
+  if (scanId) await updateScanStep(scanId, "maigret_scan");
+  const results = await executeMaigretScan(username);
+  if (scanId) await updateScanStep(scanId, "verification");
+  const verified = await verifyProfiles(results, identity);
+  const records = mapClaimedProfiles(userId, verified, scanId, selectorId);
+  if (scanId) await updateScanStep(scanId, "ingestion");
+  await upsertShadowProfiles(records);
+  await cleanupReport(username);
 
   await updateSelectorTimestamp(selectorId);
-  if (scanId) await updateScanStep(scanId, "scoring");
-  await linkBreaches(userId);
-  const score = await updateSecurityScore(userId, phoneBreach);
-  console.log(`  [scan] ✅ Done "${value}" — score: ${score}`);
+  console.log(`  [scan] ✅ Done "${value}" — ${records.length} verified profile(s)`);
 }
 
-async function sendReportEmail(userId: string, score: number): Promise<void> {
-  const { data: authUser } = await supabase.auth.admin.getUserById(userId);
-  const email = authUser?.user?.email;
-  if (!email) return;
+async function sendWeeklyReport(
+  userId: string,
+  opts: Parameters<typeof fetchWeeklyReportData>[1]
+): Promise<void> {
+  const data = await fetchWeeklyReportData(userId, opts);
+  if (!data) return;
 
-  const meta = authUser.user?.user_metadata;
-  const firstName = meta?.first_name ?? meta?.full_name?.split(" ")[0] ?? meta?.name?.split(" ")[0] ?? "there";
-
-  const { data: profiles } = await supabase
-    .from("shadow_profiles")
-    .select("site_name")
-    .eq("user_id", userId)
-    .order("last_verified_at", { ascending: false })
-    .limit(3);
-
-  const { count: totalProfiles } = await supabase
-    .from("shadow_profiles")
-    .select("*", { count: "exact", head: true })
-    .eq("user_id", userId);
-
-  const { count: breachCount } = await supabase
-    .from("shadow_profile_breaches")
-    .select("*", { count: "exact", head: true })
-    .eq("user_id", userId);
-
-  // Send immediately for the weekly batch (no 2-min delay)
-  const { sendScanReportEmail } = await import("./email.js");
-  await sendScanReportEmail({
-    to: email,
-    firstName,
-    score: score ?? 0,
-    totalProfiles: totalProfiles ?? 0,
-    breachCount: breachCount ?? 0,
-    topSites: (profiles ?? []).map((p) => ({
-      siteName: p.site_name,
-      category: categorizeSite(p.site_name),
-    })),
-  });
+  await sendWeeklyReportEmail(data);
+  await markWeeklyReportSent(userId);
 }
 
 async function scanAll(): Promise<void> {
@@ -153,18 +91,25 @@ async function scanAll(): Promise<void> {
 
   await ensureReportsDir();
 
-  // Get all distinct user IDs with selectors
-  const { data: rows, error } = await supabase
-    .from("user_selectors")
-    .select("user_id")
-    .order("user_id");
+  // Get all distinct user IDs with selectors (paged — PostgREST caps responses at 1000 rows)
+  const rows: Array<{ user_id: string }> = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from("user_selectors")
+      .select("user_id")
+      .neq("selector_type", "phone")
+      .order("id")
+      .range(from, from + 999);
 
-  if (error) {
-    console.error("[scan-all] Failed to fetch users:", error.message);
-    process.exit(1);
+    if (error) {
+      console.error("[scan-all] Failed to fetch users:", error.message);
+      process.exit(1);
+    }
+    rows.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
   }
 
-  const userIds = [...new Set((rows ?? []).map((r) => r.user_id))];
+  const userIds = [...new Set(rows.map((r) => r.user_id))];
 
   if (userIds.length === 0) {
     console.log("[scan-all] No users with selectors. Nothing to do.");
@@ -183,6 +128,7 @@ async function scanAll(): Promise<void> {
       .from("user_selectors")
       .select("id, user_id, selector_type, selector_value")
       .eq("user_id", uid)
+      .neq("selector_type", "phone")
       .order("last_scanned_at", { ascending: true, nullsFirst: true });
 
     if (!selectors || selectors.length === 0) {
@@ -190,7 +136,9 @@ async function scanAll(): Promise<void> {
       continue;
     }
 
-    let lastScore = 0;
+    // Snapshot state before scanning so the report can show what's new
+    const since = await getReportWindowStart(uid);
+    const profilesBefore = await snapshotProfileUrls(uid);
 
     // Create a shadow_scans record for this weekly scan run
     let scanId: string | undefined;
@@ -210,13 +158,6 @@ async function scanAll(): Promise<void> {
     for (const selector of selectors as UserSelector[]) {
       try {
         await processSelector(selector, scanId);
-        // Grab the latest score after each selector
-        const { data: scoreRow } = await supabase
-          .from("user_security_scores")
-          .select("score")
-          .eq("user_id", uid)
-          .single();
-        if (scoreRow) lastScore = scoreRow.score;
       } catch (err) {
         console.error(`  [scan-all] Error for "${selector.selector_value}":`, err);
         failed++;
@@ -234,9 +175,10 @@ async function scanAll(): Promise<void> {
       await updateScanStep(scanId, "completed");
     }
 
-    // Send the weekly report email
+    // Send the weekly footprint report email
     try {
-      await sendReportEmail(uid, lastScore);
+      if (NO_EMAIL) console.log("  [scan-all] --no-email set, skipping report email.");
+      else await sendWeeklyReport(uid, { since, profilesBefore });
     } catch (err) {
       console.error(`  [scan-all] Email failed for ${uid}:`, err);
     }
