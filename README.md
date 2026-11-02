@@ -31,7 +31,7 @@ On-demand scans (`POST /scan/:userId` and the new-user webhook) also look up bre
 
 ## Getting started
 
-**Requirements:** Node 20+, Python 3.10+, and either Maigret on your `PATH` or Docker running (the scanner falls back to the `soxoj/maigret` image).
+**Requirements:** Node 22+, Python 3.10+, and either Maigret on your `PATH` or Docker running (the scanner falls back to the `soxoj/maigret` image).
 
 ```bash
 npm install

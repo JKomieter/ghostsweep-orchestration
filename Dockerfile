@@ -1,5 +1,5 @@
 # ── Build stage ──
-FROM node:20-slim AS builder
+FROM node:22-slim AS builder
 
 WORKDIR /app
 
@@ -11,7 +11,7 @@ COPY src ./src
 RUN npx tsc
 
 # ── Production stage ──
-FROM node:20-slim
+FROM node:22-slim
 
 # Install Python and Maigret directly (no Docker-in-Docker needed)
 RUN apt-get update && apt-get install -y --no-install-recommends \
