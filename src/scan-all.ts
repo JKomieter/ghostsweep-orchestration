@@ -11,13 +11,14 @@ import { config } from "dotenv";
 config();
 
 import supabase from "./supabase.js";
-import { executeMaigretScan, cleanupReport, ensureReportsDir, extractEmailPrefix } from "./scanner.js";
+import { executeMaigretScan, ensureReportsDir, extractEmailPrefix, type MaigretScanOptions } from "./scanner.js";
+import { getScanOptions } from "./plans.js";
+import { maigretStepMessage } from "./pipeline.js";
 import { mapClaimedProfiles, upsertShadowProfiles, updateSelectorTimestamp } from "./ingestion.js";
 import { sendWeeklyReportEmail } from "./email.js";
 import { fetchWeeklyReportData, snapshotProfileUrls, getReportWindowStart, markWeeklyReportSent } from "./weekly-report.js";
 import { verifyProfiles, buildIdentity } from "./verification.js";
 import { markScanStarted, updateScanStep, markScanFailed, updateScanFoundCount } from "./scan-progress.js";
-import { ratelimit } from "./redis.js";
 
 const NO_EMAIL = process.argv.includes("--no-email");
 
@@ -44,30 +45,27 @@ async function getIdentity(userId: string): Promise<ReturnType<typeof buildIdent
   return cachedIdentity;
 }
 
-async function processSelector(selector: UserSelector, scanId?: string): Promise<void> {
+async function processSelector(
+  selector: UserSelector,
+  scanOptions: MaigretScanOptions,
+  scanId?: string
+): Promise<void> {
   const { id: selectorId, user_id: userId, selector_type: selectorType, selector_value: value } = selector;
 
   console.log(`  [scan] Processing ${selectorType}: "${value}"`);
-
-  const { success: allowed } = await ratelimit.limit(`scan:${userId}`);
-  if (!allowed) {
-    console.warn(`  [scan] Rate limited for user ${userId}. Skipping.`);
-    return;
-  }
 
   const identity = await getIdentity(userId);
 
   // Maigret searches by username; for emails we search the local part.
   const username = selectorType === "email" ? extractEmailPrefix(value) : value;
 
-  if (scanId) await updateScanStep(scanId, "maigret_scan");
-  const results = await executeMaigretScan(username);
+  if (scanId) await updateScanStep(scanId, "maigret_scan", undefined, maigretStepMessage(scanOptions));
+  const results = await executeMaigretScan(username, scanOptions);
   if (scanId) await updateScanStep(scanId, "verification");
   const verified = await verifyProfiles(results, identity);
   const records = mapClaimedProfiles(userId, verified, scanId, selectorId);
   if (scanId) await updateScanStep(scanId, "ingestion");
   await upsertShadowProfiles(records);
-  await cleanupReport(username);
 
   await updateSelectorTimestamp(selectorId);
   console.log(`  [scan] ✅ Done "${value}" — ${records.length} verified profile(s)`);
@@ -155,9 +153,12 @@ async function scanAll(): Promise<void> {
 
     if (scanId) await markScanStarted(scanId);
 
+    // Paid plans get the full all-sites scan
+    const scanOptions = await getScanOptions(uid);
+
     for (const selector of selectors as UserSelector[]) {
       try {
-        await processSelector(selector, scanId);
+        await processSelector(selector, scanOptions, scanId);
       } catch (err) {
         console.error(`  [scan-all] Error for "${selector.selector_value}":`, err);
         failed++;

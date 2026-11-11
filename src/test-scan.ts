@@ -8,7 +8,7 @@ import { config } from "dotenv";
 config();
 
 import supabase from "./supabase.js";
-import { extractEmailPrefix, executeMaigretScan, cleanupReport, ensureReportsDir } from "./scanner.js";
+import { extractEmailPrefix, executeMaigretScan, ensureReportsDir } from "./scanner.js";
 import { mapClaimedProfiles, upsertShadowProfiles, lookupBreachesByEmail, upsertDiscoveredServices } from "./ingestion.js";
 import { linkBreaches, updateSecurityScore } from "./scoring.js";
 import { sendScanReportEmail, categorizeSite } from "./email.js";
@@ -93,7 +93,6 @@ async function testScan(userId: string): Promise<void> {
       console.log(`[test] Found ${profiles.length} claimed profiles.`);
       await upsertShadowProfiles(profiles);
       await upsertDiscoveredServices(userId, results);
-      await cleanupReport(username);
     } catch (err) {
       console.error(`[test] Maigret scan failed for "${username}":`, err);
     }

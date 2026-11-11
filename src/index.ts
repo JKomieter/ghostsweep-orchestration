@@ -5,19 +5,28 @@ config();
 
 import express from "express";
 import supabase from "./supabase.js";
-import { ratelimit } from "./redis.js";
-import { executeMaigretScan, cleanupReport, ensureReportsDir, extractEmailPrefix, executePhoneOsint } from "./scanner.js";
-import { mapClaimedProfiles, upsertShadowProfiles, updateSelectorTimestamp, lookupBreachesByEmail, lookupBreachesByPhone, upsertDiscoveredServices } from "./ingestion.js";
-import { linkBreaches, updateSecurityScore } from "./scoring.js";
+import { scanRatelimit, teaserRatelimit } from "./redis.js";
+import { ensureReportsDir, normalizeUsername } from "./scanner.js";
 import { createWebhookRouter } from "./webhook.js";
 import { scheduleScanReportEmail, categorizeSite } from "./email.js";
-import { verifyProfiles, buildIdentity } from "./verification.js";
-import { markScanStarted, updateScanStep, markScanFailed, updateScanFoundCount } from "./scan-progress.js";
+import { runUserScan, type UserSelector } from "./pipeline.js";
 import { createTeaserScan, runTeaserScan } from "./teaser.js";
 import { generateAndUploadReport } from "./report.js";
 import type { Request, Response, NextFunction } from "express";
 
-const PORT = parseInt(process.env.PORT ?? "3000", 10);
+const PORT = parseInt(process.env.PORT ?? "8080", 10);
+
+/** Signed report URLs are re-issued on every GET, so they can be short-lived. */
+const REPORT_URL_TTL_SECONDS = 60 * 60;
+
+/** Close teaser progress streams after this long, even if the scan never finishes. */
+const SSE_MAX_DURATION_MS = 15 * 60 * 1000;
+
+/** Client IP. Fly.io sets Fly-Client-IP and overwrites any client-supplied value. */
+function clientIp(req: Request): string {
+  const flyIp = req.header("fly-client-ip");
+  return flyIp ?? req.ip ?? "unknown";
+}
 
 /**
  * Supabase Auth middleware.
@@ -61,138 +70,6 @@ async function requireAuth(req: Request, res: Response, next: NextFunction): Pro
   }
 
   next();
-}
-
-/**
- * Represents a row from the user_selectors table.
- */
-interface UserSelector {
-  id: string;
-  user_id: string;
-  selector_type: string;
-  selector_value: string;
-}
-
-/**
- * Process a single user selector through the full pipeline.
- * Branches by selector_type:
- *
- *  - username → Maigret Docker scan → ingest profiles → link breaches → score
- *  - email   → strip domain, Maigret scan on prefix + email breach lookup → score
- *  - phone   → breach lookup (highest risk) + phone OSINT placeholder → score
- */
-async function processSelector(selector: UserSelector, scanId?: string): Promise<void> {
-  const { id: selectorId, user_id: userId, selector_type: selectorType, selector_value: value } = selector;
-
-  console.log(`\n${"=".repeat(60)}`);
-  console.log(`[worker] Processing ${selectorType} selector: "${value}" (user: ${userId})`);
-  console.log(`${"=".repeat(60)}\n`);
-
-  // Rate-limit: 1 scan per user per minute
-  const { success: allowed } = await ratelimit.limit(`scan:${userId}`);
-  if (!allowed) {
-    console.warn(`[worker] Rate limited for user ${userId}. Skipping.`);
-    return;
-  }
-
-  // Fetch user identity for profile verification
-  const { data: authUser } = await supabase.auth.admin.getUserById(userId);
-  const userEmail = authUser?.user?.email;
-  const userMeta = authUser?.user?.user_metadata;
-  const emailPrefix = userEmail ? userEmail.split("@")[0]! : value;
-  const identity = buildIdentity(emailPrefix, userEmail, userMeta);
-
-  let phoneBreach = 0;
-
-  switch (selectorType) {
-    // ──────────────────────────────────────────────
-    // USERNAME: full Maigret scan + verification
-    // ──────────────────────────────────────────────
-    case "username": {
-      if (scanId) await updateScanStep(scanId, "maigret_scan");
-      const results = await executeMaigretScan(value);
-      if (scanId) await updateScanStep(scanId, "verification");
-      const verified = await verifyProfiles(results, identity);
-      const records = mapClaimedProfiles(userId, verified, scanId, selectorId);
-      if (scanId) await updateScanStep(scanId, "ingestion");
-      await upsertShadowProfiles(records);
-      if (scanId) await updateScanStep(scanId, "services");
-      await upsertDiscoveredServices(userId, verified);
-      await cleanupReport(value);
-      break;
-    }
-
-    // ──────────────────────────────────────────────
-    // EMAIL: Maigret scan on the prefix + verification + breach lookup
-    // ──────────────────────────────────────────────
-    case "email": {
-      const prefix = extractEmailPrefix(value);
-      console.log(`[worker] Email detected. Running Maigret on prefix "${prefix}" and breach lookup on "${value}".`);
-
-      if (scanId) await updateScanStep(scanId, "maigret_scan");
-      const results = await executeMaigretScan(prefix);
-      if (scanId) await updateScanStep(scanId, "verification");
-      const verified = await verifyProfiles(results, identity);
-      const records = mapClaimedProfiles(userId, verified, scanId, selectorId);
-      if (scanId) await updateScanStep(scanId, "ingestion");
-      await upsertShadowProfiles(records);
-      if (scanId) await updateScanStep(scanId, "services");
-      await upsertDiscoveredServices(userId, verified);
-      await cleanupReport(prefix);
-
-      if (scanId) await updateScanStep(scanId, "breach_lookup");
-      await lookupBreachesByEmail(userId, value);
-      break;
-    }
-
-    // ──────────────────────────────────────────────
-    // PHONE: breach lookup (highest risk) + OSINT placeholder
-    // ──────────────────────────────────────────────
-    case "phone": {
-      console.log(`[worker] Phone detected. Running breach lookup for "${value}".`);
-
-      if (scanId) await updateScanStep(scanId, "breach_lookup");
-      // Check if the phone number appears in any known breaches
-      phoneBreach = await lookupBreachesByPhone(userId, value);
-
-      // Placeholder for future phone OSINT module
-      await executePhoneOsint(value);
-      break;
-    }
-
-    default: {
-      console.warn(`[worker] Unknown selector type "${selectorType}". Running Maigret scan as fallback.`);
-      if (scanId) await updateScanStep(scanId, "maigret_scan");
-      const results = await executeMaigretScan(value);
-      if (scanId) await updateScanStep(scanId, "verification");
-      const verified = await verifyProfiles(results, identity);
-      const records = mapClaimedProfiles(userId, verified, scanId, selectorId);
-      if (scanId) await updateScanStep(scanId, "ingestion");
-      await upsertShadowProfiles(records);
-      if (scanId) await updateScanStep(scanId, "services");
-      await upsertDiscoveredServices(userId, verified);
-      await cleanupReport(value);
-      break;
-    }
-  }
-
-  // Common post-processing for all types
-  await updateSelectorTimestamp(selectorId);
-  if (scanId) await updateScanStep(scanId, "scoring");
-  await linkBreaches(userId);
-  const score = await updateSecurityScore(userId, phoneBreach);
-
-  // Persist found_count on the scan row
-  if (scanId) {
-    const { count: totalProfiles } = await supabase
-      .from("shadow_profiles")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", userId);
-
-    await updateScanFoundCount(scanId, totalProfiles ?? 0);
-  }
-
-  console.log(`\n[worker] ✅ Done processing "${value}" (${selectorType}). Score: ${score}\n`);
 }
 
 /**
@@ -287,13 +164,26 @@ app.use("/webhook", createWebhookRouter());
 app.post("/api/scan/teaser", async (req: Request, res: Response) => {
   const { username, email } = req.body as { username?: string; email?: string };
 
-  if (!username) {
+  if (!username || typeof username !== "string") {
     res.status(400).json({ error: "'username' is required." });
     return;
   }
 
+  try {
+    normalizeUsername(username);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : "Invalid username." });
+    return;
+  }
+
+  const { success: allowed } = await teaserRatelimit.limit(clientIp(req));
+  if (!allowed) {
+    res.status(429).json({ error: "Too many free scans. Please try again later." });
+    return;
+  }
+
   // Validate email format only when provided
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (email && (typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
     res.status(400).json({ error: "Invalid email format." });
     return;
   }
@@ -363,6 +253,12 @@ app.post("/scan/:userId", requireAuth, async (req, res) => {
     return;
   }
 
+  const { success: allowed } = await scanRatelimit.limit(userId);
+  if (!allowed) {
+    res.status(429).json({ error: "Too many scans. Please wait before starting another." });
+    return;
+  }
+
   console.log(`[scan] Scan triggered for user ${userId} — ${selectors.length} selector(s).`);
 
   // Return immediately, process in background
@@ -372,39 +268,21 @@ app.post("/scan/:userId", requireAuth, async (req, res) => {
     selectors: selectors.length,
   });
 
-  // Run all selectors in the background
   setImmediate(async () => {
-    if (scanId) await markScanStarted(scanId);
-
     try {
-      for (const selector of selectors as UserSelector[]) {
-        try {
-          await processSelector(selector, scanId);
-        } catch (err) {
+      const { score, succeeded } = await runUserScan(userId, selectors as UserSelector[], {
+        scanId,
+        onSelectorError: (selector, err) => {
           Sentry.captureException(err, {
             tags: { selector_type: selector.selector_type },
-            extra: { selector_value: selector.selector_value, userId },
+            extra: { userId, scanId },
           });
-          console.error(`[scan] Pipeline error for selector "${selector.selector_value}":`, err);
-        }
-      }
+        },
+      });
 
-      if (scanId) await updateScanStep(scanId, "completed");
-      console.log(`[scan] ✅ All selectors processed for user ${userId}.`);
-
-      // Send one consolidated report email after all selectors are done
-      try {
-        const { data: scoreRow } = await supabase
-          .from("user_security_scores")
-          .select("score")
-          .eq("user_id", userId)
-          .single();
-        await sendReportEmail(userId, scoreRow?.score ?? 0);
-      } catch (emailErr) {
-        console.error(`[scan] Failed to send report email for user ${userId}:`, emailErr);
-      }
+      // One consolidated report email, only if at least one selector worked
+      if (succeeded > 0) await sendReportEmail(userId, score);
     } catch (err) {
-      if (scanId) await markScanFailed(scanId, err instanceof Error ? err.message : String(err));
       Sentry.captureException(err, { extra: { userId, scanId } });
       console.error(`[scan] Fatal error for user ${userId}:`, err);
     }
@@ -438,11 +316,21 @@ app.get("/api/scan/teaser/:scanId/progress", async (req: Request, res: Response)
 
   console.log(`[sse] Client connected for scan ${scanId}`);
 
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    clearInterval(intervalId);
+    clearTimeout(timeoutId);
+    res.end();
+  };
+
   let lastProgress = -1;
   let lastMessage = "";
   let sentProfileCount = 0;
 
   const intervalId = setInterval(async () => {
+    if (closed) return;
     try {
       const { data, error } = await supabase
         .from("shadow_scans")
@@ -453,8 +341,7 @@ app.get("/api/scan/teaser/:scanId/progress", async (req: Request, res: Response)
       if (error) {
         console.error(`[sse] Error fetching scan ${scanId}:`, error.message);
         res.write(`data: ${JSON.stringify({ error: "Scan not found." })}\n\n`);
-        clearInterval(intervalId);
-        res.end();
+        close();
         return;
       }
 
@@ -465,6 +352,8 @@ app.get("/api/scan/teaser/:scanId/progress", async (req: Request, res: Response)
         .eq("scan_id", scanId)
         .eq("is_teaser", true)
         .order("last_verified_at", { ascending: true });
+
+      if (closed) return; // client left while we were querying
 
       const currentProfiles = allProfiles ?? [];
       const newProfiles = currentProfiles.slice(sentProfileCount);
@@ -502,9 +391,7 @@ app.get("/api/scan/teaser/:scanId/progress", async (req: Request, res: Response)
         };
 
         res.write(`data: ${JSON.stringify(finalEvent)}\n\n`);
-
-        clearInterval(intervalId);
-        res.end();
+        close();
         console.log(`[sse] Stream closed for scan ${scanId} (${data.status})`);
       }
     } catch (err) {
@@ -512,9 +399,14 @@ app.get("/api/scan/teaser/:scanId/progress", async (req: Request, res: Response)
     }
   }, 2_000); // Poll every 2 seconds
 
+  const timeoutId = setTimeout(() => {
+    console.warn(`[sse] Stream for scan ${scanId} hit the ${SSE_MAX_DURATION_MS / 60000} min limit.`);
+    close();
+  }, SSE_MAX_DURATION_MS);
+
   // Clean up if the client disconnects
   req.on("close", () => {
-    clearInterval(intervalId);
+    close();
     console.log(`[sse] Client disconnected for scan ${scanId}`);
   });
 });
@@ -557,10 +449,10 @@ app.get("/api/report/:userId", requireAuth, async (req: Request, res: Response) 
     return;
   }
 
-  // Generate a fresh signed URL (1 year TTL)
+  // Fresh short-lived signed URL; the client calls this endpoint again when it needs a new one
   const { data: signedData, error: signedError } = await supabase.storage
     .from(STORAGE_BUCKET)
-    .createSignedUrl(storagePath, 60 * 60 * 24 * 365);
+    .createSignedUrl(storagePath, REPORT_URL_TTL_SECONDS);
 
   if (signedError || !signedData?.signedUrl) {
     console.error(`[report] Failed to create signed URL for user ${userId}:`, signedError?.message);
@@ -632,6 +524,7 @@ app.listen(PORT, () => {
   console.log(`  GET  http://localhost:${PORT}/api/scan/teaser/:scanId/progress  (SSE)`);
   console.log(`  POST http://localhost:${PORT}/scan/:userId`);
   console.log(`  POST http://localhost:${PORT}/api/report/:userId`);
+  console.log(`  GET  http://localhost:${PORT}/api/report/:userId`);
   console.log(`  POST http://localhost:${PORT}/webhook/new-user`);
   console.log(`  GET  http://localhost:${PORT}/health`);
 });

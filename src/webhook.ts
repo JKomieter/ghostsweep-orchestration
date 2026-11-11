@@ -1,10 +1,8 @@
 import { Router } from "express";
+import * as Sentry from "@sentry/node";
 import supabase from "./supabase.js";
-import { executeMaigretScan, cleanupReport, extractEmailPrefix } from "./scanner.js";
-import { mapClaimedProfiles, upsertShadowProfiles, lookupBreachesByEmail, upsertDiscoveredServices } from "./ingestion.js";
-import { linkBreaches, updateSecurityScore } from "./scoring.js";
-import { verifyProfiles, buildIdentity } from "./verification.js";
-import { markScanStarted, updateScanStep, markScanFailed, updateScanFoundCount } from "./scan-progress.js";
+import { extractEmailPrefix } from "./scanner.js";
+import { createScanRow, runUserScan, type UserSelector } from "./pipeline.js";
 
 /**
  * Supabase webhook payload types.
@@ -134,94 +132,56 @@ export function createWebhookRouter(): Router {
         selector_value: s.selector_value,
       }));
 
-      const { error: selectorErr } = await supabase
+      const columns = "id, user_id, selector_type, selector_value";
+      let { data: stored, error: selectorErr } = await supabase
         .from("user_selectors")
         .upsert(selectorRows, { onConflict: "user_id, selector_value" })
-        .select();
+        .select(columns);
 
       if (selectorErr) {
-        // If upsert fails due to missing constraint, fall back to insert
+        // If upsert fails due to a missing unique constraint, fall back to insert
         console.warn("[webhook] Upsert selectors warning:", selectorErr.message);
-        const { error: insertErr } = await supabase
+        ({ data: stored, error: selectorErr } = await supabase
           .from("user_selectors")
-          .insert(selectorRows);
+          .insert(selectorRows)
+          .select(columns));
 
-        if (insertErr) {
-          console.error("[webhook] Failed to insert selectors:", insertErr.message);
+        if (selectorErr) {
+          console.error("[webhook] Failed to insert selectors:", selectorErr.message);
           res.status(500).json({ error: "Failed to store selectors." });
           return;
         }
       }
 
-      // 3. Kick off an immediate email breach lookup + Maigret scan on the email prefix
-      if (record.email) {
-        const prefix = extractEmailPrefix(record.email);
+      // 3. First scan: only the email selector (Maigret on the prefix + breach
+      //    lookup), so the user gets results quickly. Name-based usernames are
+      //    picked up by the weekly scan or the next on-demand scan.
+      const emailSelector = (stored as UserSelector[] | null)?.find(
+        (s) => s.selector_type === "email"
+      );
 
-        // Run in the background — don't block the webhook response
+      if (emailSelector) {
         setImmediate(async () => {
-          // Create a shadow_scans record for this webhook-initiated scan
-          let scanId: string | undefined;
+          const scanId = await createScanRow(userId);
           try {
-            const { data: scanRow } = await supabase
-              .from("shadow_scans")
-              .insert({ user_id: userId, status: "starting" })
-              .select("id")
-              .single();
-            scanId = scanRow?.id;
-          } catch (e) {
-            console.warn("[webhook] Could not create shadow_scans row:", e);
-          }
-
-          try {
-            if (scanId) await markScanStarted(scanId);
-            console.log(`[webhook] Starting background scan for "${prefix}" / "${record.email}"...`);
-
-            // Build identity from the webhook user record
-            const meta = record.raw_user_meta_data;
-            const identity = buildIdentity(prefix, record.email, meta as Record<string, unknown> | undefined);
-
-            // Maigret scan on the email prefix + verification
-            if (scanId) await updateScanStep(scanId, "maigret_scan");
-            const results = await executeMaigretScan(prefix);
-            if (scanId) await updateScanStep(scanId, "verification");
-            const verified = await verifyProfiles(results, identity);
-            const profiles = mapClaimedProfiles(userId, verified, scanId);
-            if (scanId) await updateScanStep(scanId, "ingestion");
-            await upsertShadowProfiles(profiles);
-            if (scanId) await updateScanStep(scanId, "services");
-            await upsertDiscoveredServices(userId, verified);
-            await cleanupReport(prefix);
-
-            // Email breach lookup
-            if (scanId) await updateScanStep(scanId, "breach_lookup");
-            await lookupBreachesByEmail(userId, record.email!);
-
-            // Link & score
-            if (scanId) await updateScanStep(scanId, "scoring");
-            await linkBreaches(userId);
-            const score = await updateSecurityScore(userId);
-
-            // Persist found_count and mark complete
-            if (scanId) {
-              const { count: totalProfiles } = await supabase
-                .from("shadow_profiles")
-                .select("*", { count: "exact", head: true })
-                .eq("user_id", userId);
-
-              await updateScanFoundCount(scanId, totalProfiles ?? 0);
-              await updateScanStep(scanId, "completed");
-            }
-
-            console.log(`[webhook] ✅ Background scan complete for user ${userId}.`);
+            await runUserScan(userId, [emailSelector], {
+              scanId,
+              onSelectorError: (sel, err) => {
+                Sentry.captureException(err, {
+                  tags: { endpoint: "webhook", selector_type: sel.selector_type },
+                  extra: { userId, scanId },
+                });
+              },
+            });
           } catch (err) {
-            if (scanId) await markScanFailed(scanId, err instanceof Error ? err.message : String(err));
+            Sentry.captureException(err, { tags: { endpoint: "webhook" }, extra: { userId, scanId } });
             console.error(`[webhook] Background scan error for user ${userId}:`, err);
           }
         });
       }
 
       res.status(200).json({
-        message: "User selectors created. Scan initiated.",
+        message: emailSelector ? "User selectors created. Scan initiated." : "User selectors created.",
         userId,
         selectors: selectors.length,
       });

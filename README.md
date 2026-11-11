@@ -1,6 +1,6 @@
 # ghostsweep-orchestration
 
-The scan backend for [GhostSweep](https://ghostsweep.com). It finds where a person's usernames show up across 3,000+ public websites using [Maigret](https://github.com/soxoj/maigret), filters out false matches, stores the results in Supabase, and emails the user a report.
+The scan backend for [GhostSweep](https://ghostsweep.com). It finds where a person's usernames show up across popular public websites (Maigret's top 500 by default) using [Maigret](https://github.com/soxoj/maigret), filters out false matches, stores the results in Supabase, and emails the user a report.
 
 It runs in two places:
 
@@ -16,16 +16,20 @@ selector (username / email)
    │
    ▼
 Maigret  ──►  verifyProfiles  ──►  shadow_profiles  ──►  email
-(3,000+ sites)  (drop pages that      (Supabase)
+(top 500 sites) (drop pages that      (Supabase)
                 don't match the
                 user's name/email)
 ```
 
 1. **Selectors** — what we search for — live in `user_selectors` (`username`, `email`, `phone`). For an email, Maigret searches the part before the `@`.
-2. **Maigret** runs as a subprocess and writes JSON to `./reports/`, which is deleted after ingestion (`src/scanner.ts`).
+2. **Maigret** runs as a subprocess (no shell) and writes JSON into a private temp folder under `./reports/`, which is deleted as soon as the results are parsed (`src/scanner.ts`). Concurrent scans of the same username don't interfere.
 3. **Verification** fetches each "claimed" profile page and keeps it only if it mentions the user's name or email prefix (`src/verification.ts`). This removes most same-username-different-person hits.
 4. **Ingestion** upserts verified profiles into `shadow_profiles`, keyed on `(user_id, profile_url)` (`src/ingestion.ts`).
-5. **Progress** is written to `shadow_scans` as the scan moves through its steps, so the dashboard can show a progress bar (`src/scan-progress.ts`).
+5. **Progress** is written to `shadow_scans` as the scan moves through its steps, so the dashboard can show a progress bar (`src/scan-progress.ts`). With several selectors, progress is spread across them so it only moves forward.
+
+**Scan size depends on the plan** (`src/plans.ts`): users whose `user_subscriptions.current_plan` is `pro` or `buster` get Maigret's full site list (`-a`, 3,000+ sites, ~9 min per username, 30 min timeout). Everyone else, and the public teaser, gets the top 500 sites (5 min timeout). This applies to on-demand and weekly scans.
+
+The on-demand pipeline (`POST /scan/:userId` and the webhook) lives in `src/pipeline.ts`. Each selector fails independently; the scan is marked `failed` only if every selector failed.
 
 On-demand scans (`POST /scan/:userId` and the new-user webhook) also look up breaches and recalculate the exposure score (`src/scoring.ts`). The weekly scan is **Maigret only**: no breach lookup, no scoring, and phone selectors are skipped.
 
@@ -51,7 +55,7 @@ npm run dev            # API on http://localhost:8080 with reload
 |---|---|
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service-role key — bypasses RLS, **keep it server-side** |
-| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Per-user scan rate limiting (10 per 10s) |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Rate limiting: 3 full scans per user per hour, 3 teaser scans per IP per hour |
 | `RESEND_API_KEY` | Sending report emails |
 | `PORT` | API port (default `8080`) |
 | `NODE_ENV` | Reported to Sentry as the environment |
@@ -77,12 +81,12 @@ All routes are in `src/index.ts`. Routes marked 🔒 need `Authorization: Bearer
 | Method | Route | Purpose |
 |---|---|---|
 | `GET` | `/health` | Liveness check |
-| `POST` | `/scan/:userId` 🔒 | Scan all of a user's selectors in the background. Body may include `scan_id` to report progress on an existing `shadow_scans` row. Emails the scan report ~2 minutes after finishing. |
-| `POST` | `/api/scan/teaser` | Public lead-gen scan. Body: `{ username, email? }`. Maigret top-500 sites only; results saved with `is_teaser = true`; returns `202` with `scan_id`. |
-| `GET` | `/api/scan/teaser/:scanId/progress` | Server-sent events stream of teaser scan progress |
+| `POST` | `/scan/:userId` 🔒 | Scan all of a user's selectors in the background. Returns `429` when over the rate limit. Body may include `scan_id` to report progress on an existing `shadow_scans` row. Emails the scan report ~2 minutes after finishing. |
+| `POST` | `/api/scan/teaser` | Public lead-gen scan. Body: `{ username, email? }`. Maigret top-500 sites, no verification; results saved with `is_teaser = true`; returns `202` with `scan_id`, or `429` when the IP is over the limit. |
+| `GET` | `/api/scan/teaser/:scanId/progress` | Server-sent events stream of teaser scan progress (closed after 15 minutes at most) |
 | `POST` | `/api/report/:userId` 🔒 | Generate the Identity Audit PDF in the background and upload it to the `reports` storage bucket |
-| `GET` | `/api/report/:userId` 🔒 | Fetch the latest generated PDF |
-| `POST` | `/webhook/new-user` | Supabase database webhook on user `INSERT`: saves selectors from the signup and starts a first scan |
+| `GET` | `/api/report/:userId` 🔒 | Signed URL (valid 1 hour) for the latest generated PDF |
+| `POST` | `/webhook/new-user` | Supabase database webhook on user `INSERT`: saves selectors from the signup and starts a first scan of the email selector. Not authenticated. |
 
 ## Weekly scan
 
@@ -124,7 +128,9 @@ Errors are reported to Sentry, which is configured in `src/instrumentation.ts` a
 
 ```
 src/
-  index.ts          Express app, routes, on-demand scan pipeline
+  index.ts          Express app, routes, auth, rate limits
+  pipeline.ts       On-demand scan pipeline (used by /scan and the webhook)
+  plans.ts          Plan lookup: pro / buster → all-sites scan
   scan-all.ts       Weekly scan CLI (GitHub Actions)
   scanner.ts        Runs Maigret, parses its JSON
   verification.ts   Checks profile pages against the user's identity
@@ -139,7 +145,7 @@ src/
   supabase.ts       Service-role client
   redis.ts          Upstash rate limiter
   instrumentation.ts Sentry setup
-reports/            Temporary Maigret output (deleted after each scan)
+reports/            Temporary Maigret output (one temp folder per scan, deleted after parsing; git-ignored)
 ```
 
 ## Supabase tables used

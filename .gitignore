@@ -139,3 +139,6 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .venv/
 scan-all.log
+
+# Maigret output: contains scan results for real people
+reports/

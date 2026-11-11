@@ -1,32 +1,18 @@
 /**
  * Teaser scan module.
  *
- * Runs a lightweight Maigret scan (--top 500) for unauthenticated leads.
+ * Runs a lightweight Maigret scan (top 500 sites) for unauthenticated leads.
  * Creates a shadow_scans row with status "scanning", spawns Maigret in the
  * background, streams discovered profiles into shadow_profiles with
  * is_teaser = true, and emails the result when done.
  */
-import { exec } from "node:child_process";
-import { readFile, unlink } from "node:fs/promises";
-import path from "node:path";
 import supabase from "./supabase.js";
-import { ensureReportsDir, type MaigretSiteResult } from "./scanner.js";
+import { executeMaigretScan } from "./scanner.js";
 import { categorizeSite, sendTeaserReportEmail } from "./email.js";
 
-const REPORTS_DIR = path.resolve(process.cwd(), "reports");
+const TEASER_TOP_SITES = 500;
 
 // ── Types ───────────────────────────────────────────────────────────
-
-interface MaigretRawEntry {
-  url_user: string;
-  status: {
-    status: string;
-    site_name: string;
-    url: string;
-    tags?: string[];
-  };
-  [key: string]: unknown;
-}
 
 interface TeaserShadowProfile {
   site_name: string;
@@ -81,53 +67,12 @@ export async function runTeaserScan(
   email?: string
 ): Promise<void> {
   try {
-    // ── 1. Run Maigret ────────────────────────────────────────────
-    await ensureReportsDir();
+    // ── 1. Run Maigret (top 500 sites) ────────────────────────────
+    await updateTeaserProgress(scanId, 10, "scanning", `Scanning the top ${TEASER_TOP_SITES} sites…`);
+    const results = await executeMaigretScan(username, { topSites: TEASER_TOP_SITES });
 
-    const sanitized = username.trim().replace(/\s+/g, "_");
-    const shellSafe = sanitized.replace(/'/g, "'\\''");
-
-    // Check if maigret is available directly (Fly.io) or needs Docker (local)
-    const useDirect = await new Promise<boolean>((resolve) => {
-      exec("which maigret", (error) => resolve(!error));
-    });
-
-    const directCmd = `maigret '${shellSafe}' --json simple --folderoutput "${REPORTS_DIR}"`;
-    const dockerCmd = `docker run --rm -v "${REPORTS_DIR}:/app/reports" soxoj/maigret:latest '${shellSafe}' --json simple`;
-    const cmd = useDirect ? directCmd : dockerCmd;
-
-    console.log(`[teaser] Running Maigret (all sites) for "${sanitized}" [${useDirect ? "direct" : "Docker"}]...`);
-
-    await updateTeaserProgress(scanId, 10, "scanning", "Scanning 3,000+ sites…");
-
-    await new Promise<void>((resolve, reject) => {
-      exec(cmd, { timeout: 300_000 }, (error, stdout, stderr) => {
-        if (error) {
-          console.error(`[teaser] Maigret error: ${error.message}`);
-          console.error(`[teaser] stderr: ${stderr}`);
-          reject(error);
-          return;
-        }
-        console.log(`[teaser] Maigret stdout: ${stdout.slice(0, 500)}`);
-        resolve();
-      });
-    });
-
-    // ── 2. Parse report ───────────────────────────────────────────
+    // ── 2. Filter results ─────────────────────────────────────────
     await updateTeaserProgress(scanId, 50, "scanning", "Processing results…");
-
-    const reportPath = path.join(REPORTS_DIR, `report_${sanitized}_simple.json`);
-    const raw = await readFile(reportPath, "utf-8");
-    const parsed = JSON.parse(raw) as Record<string, MaigretRawEntry>;
-
-    const results: MaigretSiteResult[] = Object.entries(parsed).map(
-      ([siteName, entry]) => ({
-        siteName,
-        url: entry.status?.url ?? entry.url_user ?? "",
-        status: (entry.status?.status ?? "").toLowerCase(),
-        tags: entry.status?.tags ?? [],
-      })
-    );
 
     const claimed = results.filter((r) => r.status === "claimed");
     console.log(`[teaser] Found ${claimed.length} claimed profiles out of ${results.length} sites.`);
@@ -181,14 +126,6 @@ export async function runTeaserScan(
       .eq("id", scanId);
 
     console.log(`[teaser] ✅ Scan ${scanId} completed.`);
-
-    // ── 5. Clean up report file ───────────────────────────────────
-    try {
-      await unlink(reportPath);
-      console.log(`[teaser] Cleaned up report: ${reportPath}`);
-    } catch {
-      console.warn(`[teaser] Could not delete report: ${reportPath}`);
-    }
 
     // ── 6. Email teaser results (only if email was provided) ──────
     if (email) {

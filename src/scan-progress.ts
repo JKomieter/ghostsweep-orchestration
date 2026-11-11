@@ -38,7 +38,7 @@ interface StepInfo {
 
 const STEPS: Record<ScanStep, StepInfo> = {
   started:       { progress:  5, status: "starting",    message: "Initializing scan…" },
-  maigret_scan:  { progress: 25, status: "scanning",    message: "Scanning 500+ sites for your accounts…" },
+  maigret_scan:  { progress: 25, status: "scanning",    message: "Scanning 500 sites for your accounts…" },
   verification:  { progress: 50, status: "scanning",    message: "Verifying discovered profiles…" },
   ingestion:     { progress: 65, status: "processing",  message: "Saving discovered accounts…" },
   services:      { progress: 75, status: "processing",  message: "Cataloging services…" },
@@ -57,18 +57,50 @@ export async function markScanStarted(scanId: string): Promise<void> {
   await updateScan(scanId, { status, progress, message });
 }
 
+/** Which selector of a multi-selector scan is currently running (0-based). */
+export interface SelectorPosition {
+  index: number;
+  total: number;
+}
+
+// Per-selector steps run between these two progress values.
+const PER_SELECTOR_START = STEPS.maigret_scan.progress;
+const PER_SELECTOR_END = STEPS.scoring.progress;
+
 /**
  * Advance the scan to a named pipeline step.
  * Updates status, progress %, and a human-readable message.
+ *
+ * When `position` is given and there is more than one selector, per-selector
+ * steps are scaled so the overall progress only moves forward, and the message
+ * says which selector is running ("(2 of 4)").
  */
-export async function updateScanStep(scanId: string, step: ScanStep): Promise<void> {
+export async function updateScanStep(
+  scanId: string,
+  step: ScanStep,
+  position?: SelectorPosition,
+  messageOverride?: string
+): Promise<void> {
   const info = STEPS[step];
   if (!info) return;
 
+  let progress = info.progress;
+  let message = messageOverride ?? info.message;
+  const perSelector = info.progress >= PER_SELECTOR_START && info.progress < PER_SELECTOR_END;
+
+  if (position && position.total > 1 && perSelector) {
+    const span = PER_SELECTOR_END - PER_SELECTOR_START;
+    const withinSelector = (info.progress - PER_SELECTOR_START) / span;
+    progress = Math.round(
+      PER_SELECTOR_START + ((position.index + withinSelector) / position.total) * span
+    );
+    message = `${message} (${position.index + 1} of ${position.total})`;
+  }
+
   const updates: Record<string, unknown> = {
     status: info.status,
-    progress: info.progress,
-    message: info.message,
+    progress,
+    message,
   };
 
   if (step === "completed") {
