@@ -11,13 +11,18 @@ import { createWebhookRouter } from "./webhook.js";
 import { scheduleScanReportEmail, categorizeSite } from "./email.js";
 import { runUserScan, type UserSelector } from "./pipeline.js";
 import { createTeaserScan, runTeaserScan } from "./teaser.js";
-import { generateAndUploadReport } from "./report.js";
+import {
+  generateAndUploadReport,
+  readReportGeneratedAt,
+  REPORT_BUCKET,
+  reportPdfPath,
+} from "./report.js";
 import type { Request, Response, NextFunction } from "express";
 
 const PORT = parseInt(process.env.PORT ?? "8080", 10);
 
 /** Signed report URLs are re-issued on every GET, so they can be short-lived. */
-const REPORT_URL_TTL_SECONDS = 60 * 60;
+const REPORT_URL_TTL_SECONDS = 15 * 60;
 
 /** Close teaser progress streams after this long, even if the scan never finishes. */
 const SSE_MAX_DURATION_MS = 15 * 60 * 1000;
@@ -428,12 +433,11 @@ app.get("/api/report/:userId", requireAuth, async (req: Request, res: Response) 
     return;
   }
 
-  const STORAGE_BUCKET = "reports";
-  const storagePath    = `${userId}/identity-audit.pdf`;
+  const storagePath = reportPdfPath(userId);
 
   // Check the file exists in storage
   const { data: fileList, error: listError } = await supabase.storage
-    .from(STORAGE_BUCKET)
+    .from(REPORT_BUCKET)
     .list(userId, { search: "identity-audit.pdf" });
 
   if (listError) {
@@ -451,7 +455,7 @@ app.get("/api/report/:userId", requireAuth, async (req: Request, res: Response) 
 
   // Fresh short-lived signed URL; the client calls this endpoint again when it needs a new one
   const { data: signedData, error: signedError } = await supabase.storage
-    .from(STORAGE_BUCKET)
+    .from(REPORT_BUCKET)
     .createSignedUrl(storagePath, REPORT_URL_TTL_SECONDS);
 
   if (signedError || !signedData?.signedUrl) {
@@ -460,9 +464,18 @@ app.get("/api/report/:userId", requireAuth, async (req: Request, res: Response) 
     return;
   }
 
+  // Completion time comes from the sidecar written at the end of generation;
+  // storage timestamps don't change when the PDF is overwritten. Reports made
+  // before the sidecar existed fall back to the object's creation time, which
+  // is always in the past, so the dashboard never mistakes them for new ones.
+  const generatedAt =
+    (await readReportGeneratedAt(userId)) ??
+    file.created_at ??
+    new Date(0).toISOString();
+
   res.json({
-    url:         signedData.signedUrl,
-    generatedAt: file.updated_at ?? file.created_at ?? null,
+    url: signedData.signedUrl,
+    generatedAt,
   });
 });
 
@@ -502,8 +515,8 @@ app.post("/api/report/:userId", requireAuth, async (req: Request, res: Response)
   // Run the full pipeline in the background.
   setImmediate(async () => {
     try {
-      const publicUrl = await generateAndUploadReport(userId);
-      console.log(`[report] ✅ PDF ready for user ${userId}: ${publicUrl}`);
+      await generateAndUploadReport(userId);
+      console.log(`[report] ✅ PDF ready for user ${userId}.`);
     } catch (err) {
       Sentry.captureException(err, {
         tags: { endpoint: "report" },

@@ -1097,24 +1097,32 @@ export async function buildReportPdf(data: ReportData): Promise<Buffer> {
 
 // ── Supabase Storage upload ──────────────────────────────────────────────────
 
-const STORAGE_BUCKET = "reports";
+export const REPORT_BUCKET = "reports";
+
+export const reportPdfPath  = (userId: string) => `${userId}/identity-audit.pdf`;
+export const reportMetaPath = (userId: string) => `${userId}/identity-audit.json`;
 
 /**
- * Upload the PDF buffer to Supabase Storage.
- * Returns the public URL for the uploaded file.
+ * Upload the PDF buffer to Supabase Storage (private bucket), then write a
+ * small sidecar JSON recording when generation finished. Storage does not
+ * bump the object's timestamps on an upsert, so the sidecar is the source of
+ * truth for `generatedAt` in GET /api/report/:userId.
  *
- * Path: reports/{userId}/identity-audit.pdf
+ * Returns the PDF storage path. Download URLs are signed on demand by
+ * GET /api/report/:userId, so none is created or logged here.
+ *
+ * Paths: reports/{userId}/identity-audit.pdf, reports/{userId}/identity-audit.json
  */
 export async function uploadReportToStorage(
   userId: string,
   pdf: Buffer
 ): Promise<string> {
-  const storagePath = `${userId}/identity-audit.pdf`;
+  const storagePath = reportPdfPath(userId);
 
   console.log(`[report] Uploading PDF to storage: ${storagePath}`);
 
   const { error } = await supabase.storage
-    .from(STORAGE_BUCKET)
+    .from(REPORT_BUCKET)
     .upload(storagePath, pdf, {
       contentType: "application/pdf",
       upsert: true,
@@ -1125,77 +1133,49 @@ export async function uploadReportToStorage(
     throw error;
   }
 
-  // Bucket is private — generate a long-lived signed URL (1 year).
-  const { data: signedData, error: signedError } = await supabase.storage
-    .from(STORAGE_BUCKET)
-    .createSignedUrl(storagePath, 60 * 60 * 24 * 365);
+  // Written after the PDF so generatedAt never points at a file that isn't there yet.
+  const meta = JSON.stringify({ generatedAt: new Date().toISOString() });
+  const { error: metaError } = await supabase.storage
+    .from(REPORT_BUCKET)
+    .upload(reportMetaPath(userId), Buffer.from(meta), {
+      contentType: "application/json",
+      cacheControl: "0",
+      upsert: true,
+    });
 
-  if (signedError || !signedData?.signedUrl) {
-    console.error("[report] Failed to create signed URL:", signedError?.message);
-    throw signedError ?? new Error("No signed URL returned.");
+  if (metaError) {
+    console.error("[report] Report metadata upload error:", metaError.message);
+    throw metaError;
   }
 
-  const publicUrl = signedData.signedUrl;
-  console.log(`[report] PDF available at: ${publicUrl}`);
-  return publicUrl;
+  return storagePath;
 }
 
-// ── Realtime broadcast ────────────────────────────────────────────────────────
-
 /**
- * Broadcast a `report_ready` event on the user's personal channel
- * (`report:<userId>`) so the frontend can react in real time.
- * Non-fatal: any failure is logged and swallowed.
+ * Completion time of the user's latest report, from the sidecar JSON.
+ * Returns null if the sidecar is missing or unreadable.
  */
-async function broadcastReportReady(userId: string, publicUrl: string): Promise<void> {
-  return new Promise((resolve) => {
-    const channel = supabase.channel(`report:${userId}`);
-    let settled = false;
+export async function readReportGeneratedAt(userId: string): Promise<string | null> {
+  const { data, error } = await supabase.storage
+    .from(REPORT_BUCKET)
+    .download(reportMetaPath(userId));
 
-    const finish = () => {
-      if (!settled) {
-        settled = true;
-        supabase.removeChannel(channel).finally(() => resolve());
-      }
-    };
+  if (error || !data) return null;
 
-    // Safety timeout — never block the caller more than 6 s.
-    const timer = setTimeout(() => {
-      console.warn("[report] Realtime broadcast timed out.");
-      finish();
-    }, 6_000);
-
-    channel.subscribe((status) => {
-      if (status === "SUBSCRIBED") {
-        channel
-          .send({
-            type: "broadcast",
-            event: "report_ready",
-            payload: {
-              user_id: userId,
-              url: publicUrl,
-              generated_at: new Date().toISOString(),
-            },
-          })
-          .then(() => {
-            clearTimeout(timer);
-            console.log(`[report] 📡 Realtime broadcast sent for user ${userId}.`);
-            finish();
-          })
-          .catch((err) => {
-            clearTimeout(timer);
-            console.warn("[report] Realtime broadcast error:", err);
-            finish();
-          });
-      }
-    });
-  });
+  try {
+    const { generatedAt } = JSON.parse(await data.text()) as { generatedAt?: unknown };
+    return typeof generatedAt === "string" && !Number.isNaN(Date.parse(generatedAt))
+      ? generatedAt
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 // ── Main orchestrator ─────────────────────────────────────────────────────────
 
 /**
- * Full pipeline: fetch data -> build PDF -> upload -> broadcast -> return public URL.
+ * Full pipeline: fetch data -> build PDF -> upload -> return storage path.
  */
 export async function generateAndUploadReport(userId: string): Promise<string> {
   const data = await fetchReportData(userId);
@@ -1207,7 +1187,5 @@ export async function generateAndUploadReport(userId: string): Promise<string> {
   const pdf = await buildReportPdf(data);
   console.log(`[report] PDF built — ${pdf.byteLength} bytes.`);
 
-  const publicUrl = await uploadReportToStorage(userId, pdf);
-  await broadcastReportReady(userId, publicUrl);
-  return publicUrl;
+  return uploadReportToStorage(userId, pdf);
 }
